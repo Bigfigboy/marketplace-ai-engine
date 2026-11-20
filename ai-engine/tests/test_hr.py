@@ -41,7 +41,8 @@ def test_hr_resume_summary_fictional_docx(make_env):
     body = r.json()
     assert body["status"] == "success" and body["data"]["task"] == "resume_summary"
     skills = [s["name"] for s in body["data"]["result"]["skills"]]
-    assert skills == ["Python", "SQL"]  # hallucinated skill removed from "confirmed"
+    # Hallucinated skill removed; skills present in the document are confirmed (model + local parser).
+    assert skills[:2] == ["Python", "SQL"] and {"Power BI", "Excel"} <= set(skills) and "Kubernetes" not in skills
     assert body["data"]["unverified_items"] == ["Kubernetes"]
     assert "Подтверждённые навыки" in body["response"] and "Отсутствующая" in body["response"]
     assert "Решение о кандидате принимает человек" in body["response"]
@@ -122,8 +123,9 @@ def test_hr_refuses_ranking_decisions_and_protected_attributes(make_env):
 
 
 def test_hr_allows_inclusive_wording(make_env):
-    llm = ScriptedLLM([json_reply(job_title="Кассир", responsibilities=[], requirements=[], nice_to_have=[],
-                                  conditions=[], how_to_apply="", inclusion_note="")])
+    llm = ScriptedLLM([json_reply(job_title="Кассир", responsibilities=["Обслуживание покупателей на кассе"],
+                                  requirements=["Внимательность"], nice_to_have=[], conditions=[], how_to_apply="",
+                                  inclusion_note="")])
     env = make_env(llm=llm)
     body = env.run(env.a.member, "hr", "Составь вакансию кассира без указания возраста и пола").json()
     assert body["status"] == "success" and llm.calls == 1

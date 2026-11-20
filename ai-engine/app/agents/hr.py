@@ -21,7 +21,7 @@ from typing import Any, Literal
 from pydantic import BaseModel, Field
 
 from app.agents.base import AgentContext, AgentResult, BaseAgent
-from app.core.errors import AppError
+from app.core.errors import AppError, LLMError
 from app.core.i18n import t
 from app.prompts.hr import build_system_prompt
 from app.security.prompt_guard import sanitize_document_text, wrap_untrusted
@@ -29,10 +29,12 @@ from app.services.hr_tools import (
     check_hr_request,
     evidence_in,
     find_skills,
+    has_content,
     looks_like_resume,
     redact_resume,
     split_sections,
     strip_decisions,
+    strip_placeholders,
     verify_skill,
 )
 from app.services.jsonutil import as_str, as_str_list, parse_json_object
@@ -62,6 +64,11 @@ _JD_DRAFT_KW = ("составь вакансию", "напиши ваканси�
                 "черновик вакансии", "текст вакансии", "описание вакансии для", "job description for",
                 "draft a job", "write a job", "create a job", "job posting", "вакансия жаз", "вакансия жоба",
                 "вакансия мәтін", "вакансияның сипаттамасын жаз", "вакансия дайында")
+# The request is about a candidate's resume (even if no resume file reached the agent).
+_RESUME_KW = ("резюме", "resume", "cv", "түйіндеме", "кандидат", "candidate", "үміткер")
+# Section words that make a message look like an actual job posting.
+_POSTING_HINTS = ("требовани", "обязанност", "условия", "мы предлагаем", "requirements", "responsibilit",
+                  "we offer", "талаптар", "міндеттер")
 _REQ_KW = ("требовани", "requirements", "талаптар", "сопостав", "соответств", "compare", "match", "салыстыр")
 
 _L = {
@@ -155,10 +162,22 @@ class HRAgent(BaseAgent):
             job_text, _ = redact_resume(job_text, mask_name_line=False)
         task = options.task if options.task != "auto" else self._detect_task(message, bool(resumes), bool(job_text))
 
+        if task == "unclear":
+            raise AppError("The HR assistant could not tell what to do. Attach a resume (file type «Резюме», "
+                           "purpose=resume) and ask for its analysis, provide a job description, or ask for "
+                           "interview questions or a job description draft.", code="hr_task_unclear",
+                           status_code=422)
         if task == "job_requirements" and not job_text:
-            job_text = message
+            if not self._looks_like_posting(message):
+                # Never treat a short request as the job posting itself (that produced empty templates).
+                raise AppError("No job description was provided. Paste the vacancy text, pass "
+                               "options.job_description, or attach a file with purpose=job_description.",
+                               code="job_description_required", status_code=422)
+            job_text, _ = redact_resume(message, mask_name_line=False)
         if task in ("resume_summary", "requirements_check") and not resumes:
-            raise AppError("This task needs a resume: upload it with purpose=resume and pass its id in file_ids.",
+            raise AppError("No resume was received by the HR assistant. Upload the resume with file type "
+                           "«Резюме» (purpose=resume), select it and send the request again. Files uploaded as "
+                           "«База знаний» are not passed to the HR assistant.",
                            code="resume_required", status_code=422)
         if task == "requirements_check" and not job_text:
             raise AppError("This task needs a job description (options.job_description or a file with "
@@ -201,9 +220,23 @@ class HRAgent(BaseAgent):
         parsed = strip_decisions(parsed, removed)
         if removed:
             warnings.append("decision_or_score_content_removed")
+        placeholders: list[str] = []
+        parsed = strip_placeholders(parsed, placeholders)
+        if placeholders:
+            warnings.append("template_placeholders_removed")
         unverified = self._verify(task, parsed, f"{resume_raw}\n{resume_text}" if resume_raw else "")
         if unverified:
             warnings.append("unverified_items_moved")
+        if task == "resume_summary":
+            # Ground the summary in the document itself: facts the local parser finds verbatim fill
+            # gaps left by the model (small local models often return incomplete JSON).
+            filled = self._fill_from_document(parsed, resume_text)
+            if filled:
+                warnings.append("local_parser_used:" + ",".join(filled))
+        if not self._has_task_content(task, parsed):
+            raise LLMError("The AI model returned an empty template instead of a result. Retry, or use a larger "
+                           "model (small local models such as qwen3:1.7b can fail on structured output).",
+                           code="llm_invalid_output", status_code=502)
 
         response = self._render(task, parsed, unverified, ctx.language)
         if result.mode == "mock":
@@ -220,13 +253,63 @@ class HRAgent(BaseAgent):
             return "interview_questions"
         if any(k in m for k in _JD_DRAFT_KW):
             return "job_description"
-        if has_resume and has_job:
+        wants_resume = bool(re.search(r"\b(" + "|".join(_RESUME_KW) + r")", m))
+        wants_requirements = any(k in m for k in _REQ_KW)
+        if has_resume and has_job and (wants_requirements or not wants_resume):
             return "requirements_check"
-        if has_resume:
-            return "resume_summary"
-        if has_job or any(k in m for k in _REQ_KW):
+        if has_resume or wants_resume:
+            return "resume_summary"  # without a resume file this becomes a clear "resume_required" error
+        if has_job or wants_requirements:
             return "job_requirements"
-        return "job_description" if "ваканс" in m or "vacanc" in m or "job" in m else "job_requirements"
+        if "ваканс" in m or "vacanc" in m or "job" in m or "вакансия" in m:
+            return "job_description"
+        return "unclear"
+
+    @staticmethod
+    def _looks_like_posting(message: str) -> bool:
+        m = message.lower()
+        sections = sum(1 for k in _POSTING_HINTS if k in m)
+        return len(message) >= 300 or (sections >= 2 and message.count("\n") >= 2)
+
+    @staticmethod
+    def _has_task_content(task: str, d: dict[str, Any]) -> bool:
+        keys = {
+            "resume_summary": ("summary", "experience", "education", "skills"),
+            "job_requirements": ("required_skills", "preferred_skills", "experience_requirements",
+                                 "education_requirements", "responsibilities", "conditions"),
+            "requirements_check": ("requirements",),
+            "interview_questions": ("questions",),
+            "job_description": ("responsibilities", "requirements"),
+        }[task]
+        return any(has_content(d.get(k)) for k in keys)
+
+    @staticmethod
+    def _fill_from_document(d: dict[str, Any], resume_text: str) -> list[str]:
+        """Add facts found verbatim in the (redacted) resume where the model left gaps."""
+        if not resume_text:
+            return []
+        filled: list[str] = []
+        kept = d.get("skills") if isinstance(d.get("skills"), list) else []
+        kept_names = {str(s.get("name", "")).strip().lower() for s in kept if isinstance(s, dict)}
+        added = [s for s in find_skills(resume_text) if s["name"].lower() not in kept_names]
+        if added:
+            d["skills"] = kept + added
+            filled.append("skills")
+        sections = split_sections(resume_text)
+        if not has_content(d.get("education")) and sections.get("education"):
+            d["education"] = [{"institution": line, "degree": "", "field": "", "year": ""}
+                              for line in sections["education"][:5]]
+            filled.append("education")
+        if not has_content(d.get("experience")) and sections.get("experience"):
+            roles: list[dict[str, Any]] = []
+            for line in sections["experience"][:30]:
+                if re.search(r"\b(19|20)\d{2}\b", line) or not roles:
+                    roles.append({"title": line, "company": "", "start": "", "end": "", "highlights": []})
+                else:
+                    roles[-1]["highlights"].append(line)
+            d["experience"] = roles[:10]
+            filled.append("experience")
+        return filled
 
     # ── grounding checks ─────────────────────────────────────────────────────
     @staticmethod

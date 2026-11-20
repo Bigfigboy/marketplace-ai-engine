@@ -156,6 +156,11 @@ function selectAgent(slug) {
     hr: "Например: Сделай сводку резюме (загрузите вымышленное резюме и отметьте его)",
   };
   $("message").placeholder = placeholders[slug] || "Сообщение агенту";
+  // Default the upload type to what this agent accepts (HR -> «Резюме»), so a resume is not
+  // stored as a knowledge-base document that the HR assistant never receives.
+  if (state.agent && state.agent.accepted_file_purposes.length) {
+    $("purpose").value = state.agent.accepted_file_purposes[0];
+  }
   renderMessages();
   renderFiles();
 }
@@ -191,7 +196,18 @@ function renderFiles() {
 function updateSelected() {
   const accepted = state.agent ? state.agent.accepted_file_purposes : [];
   const ids = state.files.filter((f) => state.selected.has(f.id) && accepted.includes(f.purpose));
-  $("selectedFiles").textContent = ids.length ? `Файлы в запросе: ${ids.map((f) => f.filename).join(", ")}` : "";
+  const unusable = state.files.filter((f) => !accepted.includes(f.purpose));
+  const box = $("selectedFiles");
+  box.classList.toggle("warn-text", !ids.length && unusable.length > 0);
+  if (ids.length) {
+    box.textContent = `Файлы в запросе: ${ids.map((f) => f.filename).join(", ")}`;
+  } else if (unusable.length && state.agent) {
+    const names = { knowledge_base: "База знаний", resume: "Резюме", job_description: "Вакансия", brief: "Бриф" };
+    const need = accepted.map((p) => `«${names[p] || p}»`).join(" или ") || "—";
+    box.textContent = `Загруженные файлы не передаются этому агенту: нужен тип ${need}. Загрузите файл заново с этим типом.`;
+  } else {
+    box.textContent = "";
+  }
 }
 
 async function upload(ev) {

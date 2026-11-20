@@ -148,7 +148,8 @@ def test_hr_summary_drops_substring_skills(make_env):
     env = make_env(llm=llm)
     fid = env.upload(env.a.member, "cv.docx", make_docx(resume), purpose="resume").json()["id"]
     body = env.run(env.a.member, "hr", "Summary", file_ids=[fid], options={"task": "resume_summary"}).json()
-    assert [s["name"] for s in body["data"]["result"]["skills"]] == ["PostgreSQL"]
+    # PostgreSQL (model) + JavaScript (found in the document by the parser); Java/SQL stay unconfirmed.
+    assert [s["name"] for s in body["data"]["result"]["skills"]] == ["PostgreSQL", "JavaScript"]
     assert set(body["data"]["unverified_items"]) == {"Java", "SQL"}
 
 

@@ -243,3 +243,35 @@ def strip_decisions(value: Any, removed: list[str]) -> Any:
         removed.append("decision_sentence")
         return _DECISION_OUTPUT_RE.sub("", value).strip()
     return value
+
+
+# ── Template placeholders (small models copy the JSON skeleton from the prompt) ──
+_PLACEHOLDER_RE = re.compile(r"^\s*<[^<>]{2,200}>\s*$")
+
+
+def _is_empty(value: Any) -> bool:
+    if value is None:
+        return True
+    if isinstance(value, str):
+        return not value.strip()
+    if isinstance(value, (list, dict)):
+        items = value.values() if isinstance(value, dict) else value
+        return all(_is_empty(v) for v in items)
+    return False
+
+
+def strip_placeholders(value: Any, removed: list[str]) -> Any:
+    """Blank out "<describe X>" strings copied from the prompt and drop empty list items."""
+    if isinstance(value, dict):
+        return {k: strip_placeholders(v, removed) for k, v in value.items()}
+    if isinstance(value, list):
+        items = [strip_placeholders(v, removed) for v in value]
+        return [v for v in items if not _is_empty(v)]
+    if isinstance(value, str) and _PLACEHOLDER_RE.match(value):
+        removed.append(value.strip()[:80])
+        return ""
+    return value
+
+
+def has_content(value: Any) -> bool:
+    return not _is_empty(value)
