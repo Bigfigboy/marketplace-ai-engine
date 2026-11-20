@@ -34,7 +34,7 @@ JWT claims: `sub` (id пользователя маркетплейса, обя�
 | 404 | `agent_not_found`, `file_not_found`, `run_not_found`, `not_found` | нет объекта **или нет доступа** (чужая компания) |
 | 413 | `file_too_large`, `payload_too_large`, `input_token_limit_exceeded` | превышены размеры |
 | 415 | `unsupported_file_type` | расширение не PDF/DOCX/TXT |
-| 422 | `validation_error`, `message_too_long`, `file_type_mismatch`, `empty_file`, `empty_document`, `corrupted_file`, `encrypted_pdf`, `ocr_required`, `too_many_pages`, `invalid_purpose`, `file_purpose_not_accepted`, `too_many_files`, `resume_required`, `job_description_required`, `one_resume_per_run`, `too_many_job_descriptions`, `job_description_looks_like_resume`, `document_too_complex` | некорректный ввод |
+| 422 | `validation_error`, `message_too_long`, `file_type_mismatch`, `empty_file`, `empty_document`, `corrupted_file`, `encrypted_pdf`, `ocr_required`, `too_many_pages`, `invalid_purpose`, `file_purpose_not_accepted`, `too_many_files`, `resume_required`, `job_description_required`, `one_resume_per_run`, `too_many_job_descriptions`, `job_description_looks_like_resume`, `document_too_complex`, `hr_task_unclear` | некорректный ввод |
 | 429 | `rate_limited`, `daily_limit_exceeded`, `spend_limit_exceeded`, `company_spend_limit_exceeded` | лимиты (заголовок `Retry-After`) |
 | 500 | `internal_error` | непредвиденная ошибка (детали только в логах) |
 | 429 | `llm_rate_limited`, `llm_free_quota_exhausted` | лимит бесплатного тарифа LLM-провайдера (или «предохранитель» движка); `Retry-After`; модель не меняется |
