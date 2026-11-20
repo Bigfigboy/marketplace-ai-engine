@@ -97,7 +97,20 @@ ZIP-бомб и DoS-тесты (`tests/test_review_regressions.py`) — без �
 Linux, Python 3.13:  142 passed, 3 skipped (Windows-only)
 Linux, Python 3.11:  142 passed, 3 skipped
 PostgreSQL 16:       142 passed, 3 skipped
-Windows (GitHub Actions windows-latest, Python 3.12): результат — в следующем коммите отчёта, run 44826751737
+Windows Server (GitHub Actions windows-latest, Python 3.12.10): 144 passed, 1 skipped (Unix-only)
+Linux (GitHub Actions ubuntu-latest, Python 3.12):              успешно
+```
+
+Прогон: https://github.com/Bigfigboy/marketplace-ai-engine/actions/runs/44827478440. На Windows
+выполнены и прошли Windows-only тесты: Job Object реально вызывает `MemoryError` при попытке выделить
+512 MB под лимитом 128 MB; воркер сообщает `memory_limit = job_object`; PDF ~1.5 КБ и DOCX с казахским
+текстом загружаются через API (201). Предыдущий прогон выявил одну ошибку в ожидании теста (имитация
+«нет `resource`» на настоящей Windows даёт `job_object`, а не `unavailable`) — исправлено в тесте.
+Ручная проверка на Windows 11 у команды (PowerShell, из папки `ai-engine`):
+
+```powershell
+python -m pytest tests/test_windows_compat.py -q     # ожидается: 16 passed, 1 skipped
+python -m pytest -q                                  # весь набор: 144 passed, 1 skipped
 ```
 
 ## Мультипровайдерный LLM-слой (итерация 3)
