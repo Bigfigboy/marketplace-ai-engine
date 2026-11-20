@@ -126,7 +126,7 @@ curl -s localhost:8000/agents/hr/run -H "Authorization: Bearer $KEY" -H "Content
 ## Тесты
 
 ```bash
-pytest                       # 145 тестов (3 из них только для Windows), SQLite, без сети и без реальных LLM
+pytest                       # 172 теста (3 из них только для Windows), SQLite, без сети и без реальных LLM
 TEST_DATABASE_URL=postgresql+psycopg://user@host:5432/test_db pytest   # тот же набор на PostgreSQL
 ```
 
@@ -159,6 +159,9 @@ ai-engine/
 
 ## Документация
 
+- **Интеграция с Backend 2 (Supabase):** [AI_ENGINE_HANDOFF.md](docs/AI_ENGINE_HANDOFF.md),
+  [API_CONTRACT.md](docs/API_CONTRACT.md), [SUPABASE_INTEGRATION.md](docs/SUPABASE_INTEGRATION.md),
+  [INTEGRATION_CHECKLIST.md](docs/INTEGRATION_CHECKLIST.md)
 - [API_DOCUMENTATION.md](docs/API_DOCUMENTATION.md) — endpoints, схемы, коды ошибок
 - [INTEGRATION_GUIDE.md](docs/INTEGRATION_GUIDE.md) — подключение фронтенда маркетплейса, новые агенты, PostgreSQL, деплой
 - [ARCHITECTURE.md](docs/ARCHITECTURE.md) — устройство движка, безопасность, масштабирование
