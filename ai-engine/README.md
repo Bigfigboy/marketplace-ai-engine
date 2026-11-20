@@ -98,7 +98,7 @@ curl -s localhost:8000/agents/hr/run -H "Authorization: Bearer $KEY" -H "Content
 ## Тесты
 
 ```bash
-pytest                       # 81 тест, SQLite, без сети и без реального OpenAI
+pytest                       # 94 теста, SQLite, без сети и без реального OpenAI
 TEST_DATABASE_URL=postgresql+psycopg://user@host:5432/test_db pytest   # тот же набор на PostgreSQL
 ```
 
@@ -131,6 +131,8 @@ ai-engine/
 - [API_DOCUMENTATION.md](docs/API_DOCUMENTATION.md) — endpoints, схемы, коды ошибок
 - [INTEGRATION_GUIDE.md](docs/INTEGRATION_GUIDE.md) — подключение фронтенда маркетплейса, новые агенты, PostgreSQL, деплой
 - [ARCHITECTURE.md](docs/ARCHITECTURE.md) — устройство движка, безопасность, масштабирование
+- [CLOUD_DEPLOY.md](docs/CLOUD_DEPLOY.md) — запуск в облаке (Render) без терминала
+- [FRONTEND_QUICKSTART.md](docs/FRONTEND_QUICKSTART.md) — памятка для frontend-разработчика
 - [TEST_REPORT.md](docs/TEST_REPORT.md) — фактические результаты тестов
 - [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md) — использованные open-source проекты и лицензии
 

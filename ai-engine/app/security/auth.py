@@ -22,6 +22,7 @@ from dataclasses import dataclass
 from datetime import UTC, datetime
 
 from sqlalchemy import select
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from app.core.config import Settings
@@ -109,6 +110,16 @@ def _authenticate_api_key(db: Session, raw_key: str) -> Principal:
 
 
 def _authenticate_jwt(db: Session, settings: Settings, token: str) -> Principal:
+    claims = _decode_jwt(settings, token)
+    try:
+        return _provision_from_claims(db, claims)
+    except IntegrityError:
+        # Two first-time requests for the same user/company raced; the other one created it.
+        db.rollback()
+        return _provision_from_claims(db, claims)
+
+
+def _decode_jwt(settings: Settings, token: str) -> dict:
     import jwt
 
     assert settings.jwt_secret is not None
@@ -127,7 +138,10 @@ def _authenticate_jwt(db: Session, settings: Settings, token: str) -> Principal:
         raise AuthError("Token expired", code="token_expired") from exc
     except jwt.PyJWTError as exc:
         raise AuthError("Invalid credentials", code="invalid_credentials") from exc
+    return claims
 
+
+def _provision_from_claims(db: Session, claims: dict) -> Principal:
     ext_user = str(claims.get("sub") or "").strip()
     ext_company = str(claims.get("company_id") or "").strip()
     if not ext_user or not ext_company or len(ext_user) > 128 or len(ext_company) > 128:

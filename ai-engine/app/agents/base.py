@@ -82,6 +82,10 @@ class AgentContext:
         self.llm_mode = result.mode
         self.model = result.model
         self.warnings.extend(result.warnings)
+        if not result.text.strip():
+            # E.g. a reasoning model that spent the whole MAX_OUTPUT_TOKENS budget on reasoning.
+            raise LLMError("The AI provider returned an empty response. Retry, or raise MAX_OUTPUT_TOKENS.",
+                           code="llm_empty_output", status_code=502)
         return result
 
     def history_messages(self, max_chars: int = 6000) -> list[dict[str, str]]:

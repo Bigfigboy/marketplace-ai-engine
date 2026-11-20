@@ -2,16 +2,18 @@
 
 from __future__ import annotations
 
+import threading
 from datetime import UTC, datetime, timedelta
 from zoneinfo import ZoneInfo
 
-from sqlalchemy import func, select
+from sqlalchemy import func, select, text
 from sqlalchemy.orm import Session
 
 from app.core.config import Settings
 from app.core.errors import LimitExceededError
 from app.database.models import AgentRun
 from app.security.auth import Principal
+from app.services.pricing import estimate_cost
 
 # Runs rejected before execution (validation, quota) do not consume quota.
 NON_BILLABLE_STATUSES = ("rejected",)
@@ -57,3 +59,30 @@ def check_quotas(db: Session, settings: Settings, principal: Principal) -> None:
             and _spend_today(db, settings, principal.company_id) >= settings.company_daily_spend_limit):
         raise LimitExceededError("Your company's daily spend limit has been reached.",
                                  code="company_spend_limit_exceeded", headers=retry)
+
+
+# Serialises "check quotas + record the run" so concurrent requests cannot all pass the
+# same check (check-then-act race). Process-local lock + a PostgreSQL advisory lock that
+# covers several replicas sharing one database.
+_RESERVE_LOCK = threading.Lock()
+_PG_LOCK_KEY = 0x41495F454E47  # arbitrary constant ("AI_ENG")
+
+
+def reserve_run(db: Session, settings: Settings, principal: Principal, run: AgentRun) -> None:
+    """Atomically check limits and persist ``run`` as ``running`` with a worst-case cost reservation.
+
+    The reservation (max input + max output tokens at configured prices) counts against
+    spend limits until the run finishes and the actual cost replaces it.
+    """
+    with _RESERVE_LOCK:
+        try:
+            if db.get_bind().dialect.name == "postgresql":
+                db.execute(text("SELECT pg_advisory_xact_lock(:key)"), {"key": _PG_LOCK_KEY})
+            check_quotas(db, settings, principal)
+            run.status = "running"
+            run.estimated_cost = estimate_cost(settings, settings.max_input_tokens, settings.max_output_tokens)
+            db.add(run)
+            db.commit()  # also releases the advisory lock
+        except Exception:
+            db.rollback()
+            raise

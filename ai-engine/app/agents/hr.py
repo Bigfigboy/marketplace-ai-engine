@@ -29,9 +29,11 @@ from app.services.hr_tools import (
     check_hr_request,
     evidence_in,
     find_skills,
+    looks_like_resume,
     redact_resume,
     split_sections,
     strip_decisions,
+    verify_skill,
 )
 from app.services.jsonutil import as_str, as_str_list, parse_json_object
 
@@ -121,11 +123,11 @@ class HRAgent(BaseAgent):
     output_model = HROutput
 
     def precheck(self, message: str, options: BaseModel, ctx: AgentContext) -> AgentResult | None:
-        violation = check_hr_request(message)
-        if violation is None and isinstance(options, HROptions) and options.job_description:
-            # The job text itself must not set discriminatory requirements for a new draft.
-            if options.task == "job_description":
-                violation = check_hr_request(options.job_description)
+        # Everything the client controls is checked: message, every history turn and job fields.
+        texts = [message, *(h.content for h in ctx.history)]
+        if isinstance(options, HROptions):
+            texts += [options.job_title or "", options.job_description or ""]
+        violation = next((v for v in map(check_hr_request, texts) if v), None)
         if violation is None:
             return None
         return AgentResult(response=t("hr_policy_block", ctx.language), status="blocked",
@@ -140,7 +142,17 @@ class HRAgent(BaseAgent):
         if len(resumes) > 1:
             raise AppError("Only one resume per request is allowed: the assistant does not compare or rank "
                            "candidates.", code="one_resume_per_run", status_code=422)
+        if len(job_files) > 1:
+            raise AppError("Only one job description file per request is allowed.",
+                           code="too_many_job_descriptions", status_code=422)
+        if any(looks_like_resume(f.text) for f in job_files):
+            # A resume uploaded as "job_description" would bypass redaction and the one-resume rule.
+            raise AppError("The job_description file looks like a resume. Upload resumes with purpose=resume.",
+                           code="job_description_looks_like_resume", status_code=422)
         job_text = options.job_description or "\n\n".join(f.text for f in job_files) or ""
+        if job_text:
+            # Defence in depth: no contact details or personal identifiers leave the server.
+            job_text, _ = redact_resume(job_text, mask_name_line=False)
         task = options.task if options.task != "auto" else self._detect_task(message, bool(resumes), bool(job_text))
 
         if task == "job_requirements" and not job_text:
@@ -228,8 +240,9 @@ class HRAgent(BaseAgent):
             for skill in parsed["skills"]:
                 name = as_str(skill.get("name") if isinstance(skill, dict) else skill, 200)
                 evidence = as_str(skill.get("evidence"), 500) if isinstance(skill, dict) else ""
-                if name and evidence_in(resume_raw, evidence, name):
-                    kept.append({"name": name, "evidence": evidence})
+                proof = verify_skill(resume_raw, name, evidence) if name else None
+                if proof:
+                    kept.append({"name": name, "evidence": proof})
                 elif name:
                     unverified.append(name)
             parsed["skills"] = kept

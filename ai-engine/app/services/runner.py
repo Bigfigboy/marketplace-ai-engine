@@ -25,7 +25,7 @@ from app.services.files import load_files
 from app.services.language import detect_language
 from app.services.llm import LLMProvider
 from app.services.pricing import estimate_cost
-from app.services.quotas import check_quotas
+from app.services.quotas import reserve_run
 
 logger = logging.getLogger("app.runner")
 
@@ -77,8 +77,9 @@ def execute_run(*, db: Session, settings: Settings, registry: AgentRegistry, llm
         if bad:
             raise AppError(f"This agent accepts files with purpose: {', '.join(agent.accepted_file_purposes) or 'none'}.",
                            code="file_purpose_not_accepted", status_code=422, details={"file_ids": bad})
-        check_quotas(db, settings, principal)
+        reserve_run(db, settings, principal, run)  # atomic limit check + "running" record
     except AppError as exc:
+        run.estimated_cost = None
         _finish("rejected", exc.code)
         exc.details = {**exc.details, "run_id": run_id}
         raise
@@ -87,7 +88,8 @@ def execute_run(*, db: Session, settings: Settings, registry: AgentRegistry, llm
                        files=files, history=request.history, llm=llm,
                        deadline=time.monotonic() + settings.request_timeout_seconds)
     try:
-        texts = [request.message] + [h.content for h in request.history if h.role == "user"]
+        # Every client-supplied turn is untrusted, including "assistant" turns.
+        texts = [request.message] + [h.content for h in request.history]
         if any(detect_override_attempt(x) for x in texts):
             result = AgentResult(response=t("blocked_injection", language), status="blocked",
                                  warnings=["prompt_injection_attempt_blocked"])
@@ -103,6 +105,8 @@ def execute_run(*, db: Session, settings: Settings, registry: AgentRegistry, llm
     except Exception as exc:  # noqa: BLE001
         logger.error("agent_crashed", extra={"run_id": run_id, "agent": agent.slug,
                                              "error_type": type(exc).__name__})
+        run.input_tokens, run.output_tokens = ctx.input_tokens, ctx.output_tokens
+        run.estimated_cost = estimate_cost(settings, ctx.input_tokens, ctx.output_tokens) if ctx.input_tokens else None
         _finish("error", "internal_error")
         raise AppError("Internal error while running the agent", code="internal_error", status_code=500,
                        details={"run_id": run_id}) from None

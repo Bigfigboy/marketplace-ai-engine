@@ -8,9 +8,11 @@ import uuid
 
 from fastapi.responses import JSONResponse
 from starlette.concurrency import run_in_threadpool
+from starlette.exceptions import HTTPException as StarletteHTTPException
 from starlette.middleware.base import BaseHTTPMiddleware, RequestResponseEndpoint
 from starlette.requests import Request
 from starlette.responses import Response
+from starlette.types import ASGIApp, Message, Receive, Scope, Send
 
 from app.core.errors import AuthError, error_body
 from app.security.auth import authenticate, extract_credential
@@ -33,10 +35,6 @@ class RequestContextMiddleware(BaseHTTPMiddleware):
         request_id = uuid.uuid4().hex[:16]
         request.state.request_id = request_id
         started = time.perf_counter()
-        too_large = self._body_too_large(request)
-        if too_large:
-            return JSONResponse(status_code=413, content=error_body(
-                too_large[0], too_large[1], request_id=request_id))
         response = await call_next(request)
         response.headers["X-Request-ID"] = request_id
         response.headers["X-Content-Type-Options"] = "nosniff"
@@ -55,21 +53,6 @@ class RequestContextMiddleware(BaseHTTPMiddleware):
         })
         return response
 
-
-    @staticmethod
-    def _body_too_large(request: Request) -> tuple[str, str] | None:
-        """Reject oversized bodies early, before multipart parsing spools them to disk."""
-        length = request.headers.get("content-length")
-        if not length or not length.isdigit():
-            return None
-        settings = request.app.state.settings
-        if request.url.path == "/files/upload":
-            limit = settings.max_file_size_bytes + 64 * 1024  # multipart overhead
-            error = ("file_too_large", f"File exceeds the {settings.max_file_size_mb:g} MB limit.")
-        else:
-            limit = 1024 * 1024
-            error = ("payload_too_large", "Request body is too large.")
-        return error if int(length) > limit else None
 
 
 class AuthMiddleware(BaseHTTPMiddleware):
@@ -113,3 +96,78 @@ class AuthMiddleware(BaseHTTPMiddleware):
         return JSONResponse(status_code=401, headers={"WWW-Authenticate": "Bearer"},
                             content=error_body(exc.code, exc.message,
                                                request_id=getattr(request.state, "request_id", None)))
+
+
+class BodyTooLargeError(StarletteHTTPException):
+    def __init__(self, code: str, message: str) -> None:
+        super().__init__(status_code=413, detail=message)
+        self.code = code
+
+
+class BodySizeLimitMiddleware:
+    """Pure ASGI middleware that caps request bodies while they stream in.
+
+    Works with and without ``Content-Length`` (chunked uploads), so oversized bodies are
+    never fully read, parsed or spooled to disk.
+    """
+
+    def __init__(self, app: ASGIApp, *, file_limit: int, default_limit: int = 1024 * 1024) -> None:
+        self.app = app
+        self.file_limit = file_limit
+        self.default_limit = default_limit
+
+    def _limit(self, path: str) -> tuple[int, str, str]:
+        if path == "/files/upload":
+            mb = self.file_limit / (1024 * 1024)
+            # + multipart overhead
+            return self.file_limit + 64 * 1024, "file_too_large", f"File exceeds the {mb:g} MB limit."
+        return self.default_limit, "payload_too_large", "Request body is too large."
+
+    async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
+        if scope["type"] != "http":
+            await self.app(scope, receive, send)
+            return
+        limit, code, message = self._limit(scope.get("path", ""))
+        for name, value in scope.get("headers", []):
+            if name == b"content-length" and value.isdigit() and int(value) > limit:
+                await self._reject(send, code, message)
+                return
+
+        received = 0
+        exceeded = False
+        response_started = False
+
+        async def limited_receive() -> Message:
+            nonlocal received, exceeded
+            msg = await receive()
+            if msg["type"] == "http.request":
+                received += len(msg.get("body", b""))
+                if received > limit:
+                    exceeded = True
+                    raise BodyTooLargeError(code, message)
+            return msg
+
+        async def guarded_send(msg: Message) -> None:
+            nonlocal response_started
+            if exceeded:
+                # The framework may turn the aborted read into a generic 400; answer 413 instead.
+                if msg["type"] == "http.response.start" and not response_started:
+                    response_started = True
+                    await self._reject(send, code, message)
+                return
+            if msg["type"] == "http.response.start":
+                response_started = True
+            await send(msg)
+
+        try:
+            await self.app(scope, limited_receive, guarded_send)
+        except BodyTooLargeError:
+            if not response_started:
+                response_started = True
+                await self._reject(send, code, message)
+
+    @staticmethod
+    async def _reject(send: Send, code: str, message: str) -> None:
+        response = JSONResponse(status_code=413, content=error_body(code, message))
+        await send({"type": "http.response.start", "status": 413, "headers": response.raw_headers})
+        await send({"type": "http.response.body", "body": response.body})

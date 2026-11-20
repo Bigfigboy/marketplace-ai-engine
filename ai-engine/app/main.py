@@ -26,7 +26,7 @@ from app.core.logging import configure_logging
 from app.database.models import ApiKey, Company, User
 from app.database.session import build_engine, build_sessionmaker, run_migrations
 from app.security.auth import create_api_key, hash_api_key
-from app.security.middleware import AuthMiddleware, RequestContextMiddleware
+from app.security.middleware import AuthMiddleware, BodySizeLimitMiddleware, RequestContextMiddleware
 from app.security.rate_limit import SlidingWindowRateLimiter
 from app.services.llm import LLMProvider, build_llm_provider
 
@@ -98,6 +98,7 @@ def create_app(settings: Settings | None = None, llm: LLMProvider | None = None)
     # Order: the last added middleware runs first (CORS -> context -> auth -> routes).
     app.add_middleware(AuthMiddleware)
     app.add_middleware(RequestContextMiddleware)
+    app.add_middleware(BodySizeLimitMiddleware, file_limit=settings.max_file_size_bytes)
     app.add_middleware(
         CORSMiddleware,
         allow_origins=settings.cors_origin_list,

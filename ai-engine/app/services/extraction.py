@@ -6,17 +6,24 @@ Detection and extraction logic adapted from Resume-AI-Parser (MIT,
 * the ``puremagic`` dependency is replaced by explicit signature + structure checks;
 * the extension must agree with the detected content (a renamed file is rejected);
 * ZIP-bomb limits for DOCX, a page limit for PDF, and a size limit on extracted text;
-* error codes for empty, corrupted, encrypted and image-only (OCR-required) documents.
+* error codes for empty, corrupted, encrypted and image-only (OCR-required) documents;
+* PDF/DOCX parsing runs in a separate process with a wall-clock timeout and a memory
+  limit, and stops as soon as enough text has been collected, so a small crafted file
+  (highly compressed content streams, giant XML) cannot exhaust the server.
 """
 
 from __future__ import annotations
 
 import io
+import json
+import logging
 import re
+import subprocess
+import sys
 import unicodedata
 import zipfile
 from dataclasses import dataclass, field
-from pathlib import PurePosixPath
+from pathlib import Path, PurePosixPath
 
 from app.core.errors import FileValidationError
 
@@ -25,7 +32,12 @@ ALLOWED_EXTENSIONS = {".pdf": "pdf", ".docx": "docx", ".txt": "txt"}
 _PDF_MAGIC = b"%PDF-"
 _ZIP_MAGIC = (b"PK\x03\x04",)
 _MAX_DOCX_UNCOMPRESSED = 100 * 1024 * 1024
+_MAX_DOCX_DOCUMENT_XML = 20 * 1024 * 1024
+_MAX_DOCX_EXPANSION_RATIO = 100
 _MAX_DOCX_ENTRIES = 2_000
+
+logger = logging.getLogger("app.extraction")
+_APP_ROOT = Path(__file__).resolve().parents[2]  # directory that contains the "app" package
 _MIN_TEXT_CHARS = 20
 
 _BLANK_RUN_RE = re.compile(r"\n{3,}")
@@ -64,17 +76,24 @@ def normalize_whitespace(text: str) -> str:
 
 
 def _is_docx(data: bytes) -> bool:
+    """True for an OOXML word-processing package within safe expansion limits."""
     try:
         with zipfile.ZipFile(io.BytesIO(data)) as zf:
             infos = zf.infolist()
-            if len(infos) > _MAX_DOCX_ENTRIES:
-                raise FileValidationError("DOCX archive has too many entries", code="corrupted_file")
-            if sum(i.file_size for i in infos) > _MAX_DOCX_UNCOMPRESSED:
-                raise FileValidationError("DOCX archive expands beyond the allowed size", code="corrupted_file")
             names = {i.filename for i in infos}
-            return "word/document.xml" in names and "[Content_Types].xml" in names
+            if not ("word/document.xml" in names and "[Content_Types].xml" in names):
+                return False
+            total = sum(i.file_size for i in infos)
+            document_xml = zf.getinfo("word/document.xml").file_size
     except zipfile.BadZipFile:
         return False
+    except Exception as exc:  # noqa: BLE001 - malformed archives raise many different errors
+        raise FileValidationError("The DOCX file is damaged and cannot be read.", code="corrupted_file") from exc
+    if (len(infos) > _MAX_DOCX_ENTRIES or total > _MAX_DOCX_UNCOMPRESSED
+            or total > _MAX_DOCX_EXPANSION_RATIO * max(len(data), 1) or document_xml > _MAX_DOCX_DOCUMENT_XML):
+        raise FileValidationError("The DOCX file is too complex to process (archive expands too much).",
+                                  code="document_too_complex")
+    return True
 
 
 def _looks_like_text(data: bytes) -> bool:
@@ -121,7 +140,7 @@ def detect_format(data: bytes, filename: str) -> str:
     return detected
 
 
-def _extract_pdf(data: bytes, max_pages: int) -> ExtractedDocument:
+def _extract_pdf(data: bytes, max_pages: int, max_chars: int = 500_000) -> ExtractedDocument:
     from pypdf import PdfReader
     from pypdf.errors import PdfReadError
 
@@ -140,8 +159,12 @@ def _extract_pdf(data: bytes, max_pages: int) -> ExtractedDocument:
         if page_count > max_pages:
             raise FileValidationError(f"The PDF has more than {max_pages} pages.", code="too_many_pages")
         pages: list[str] = []
+        collected = 0
         empty_pages = 0
         for index, page in enumerate(reader.pages, start=1):
+            if collected > max_chars:
+                warnings.append("text_truncated")
+                break
             try:
                 page_text = page.extract_text() or ""
             except Exception:  # noqa: BLE001 - one bad page should not fail the document
@@ -149,6 +172,7 @@ def _extract_pdf(data: bytes, max_pages: int) -> ExtractedDocument:
                 continue
             if page_text.strip():
                 pages.append(page_text)
+                collected += len(page_text)
             else:
                 empty_pages += 1
         if empty_pages:
@@ -169,7 +193,7 @@ def _extract_pdf(data: bytes, max_pages: int) -> ExtractedDocument:
     return ExtractedDocument(text=text, file_format="pdf", page_count=page_count, warnings=warnings)
 
 
-def _extract_docx(data: bytes) -> ExtractedDocument:
+def _extract_docx(data: bytes, max_chars: int = 500_000) -> ExtractedDocument:
     try:
         import docx
         from docx.oxml.ns import qn
@@ -178,7 +202,11 @@ def _extract_docx(data: bytes) -> ExtractedDocument:
 
         document = docx.Document(io.BytesIO(data))
         blocks: list[str] = []
+        collected = 0
         for child in document.element.body.iterchildren():
+            if collected > max_chars:
+                break
+            before = len(blocks)
             if child.tag == qn("w:p"):
                 text = Paragraph(child, document).text.strip()
                 if text:
@@ -191,11 +219,14 @@ def _extract_docx(data: bytes) -> ExtractedDocument:
                             deduped.append(cell)
                     if deduped:
                         blocks.append(" | ".join(deduped))
+            collected += sum(len(b) for b in blocks[before:])
+        seen = set(blocks)
         for section in document.sections:
             for container in (section.header, section.footer):
                 for paragraph in container.paragraphs:
                     text = paragraph.text.strip()
-                    if text and text not in blocks:
+                    if text and text not in seen:
+                        seen.add(text)
                         blocks.append(text)
     except Exception as exc:  # noqa: BLE001
         raise FileValidationError("The DOCX file is damaged and cannot be read.", code="corrupted_file") from exc
@@ -213,13 +244,37 @@ def _extract_txt(data: bytes) -> ExtractedDocument:
     raise FileValidationError("The text file encoding is not supported (use UTF-8).", code="corrupted_file")
 
 
-def extract_text(data: bytes, filename: str, *, max_pages: int = 200,
-                 max_chars: int = 500_000) -> ExtractedDocument:
+def _extract_isolated(file_format: str, data: bytes, *, max_pages: int, max_chars: int,
+                      timeout_seconds: float, memory_mb: int) -> ExtractedDocument:
+    """Parse PDF/DOCX in a separate, time- and memory-limited process (see extract_worker)."""
+    cmd = [sys.executable, "-m", "app.services.extract_worker", file_format, str(max_pages), str(max_chars),
+           str(memory_mb)]
+    try:
+        proc = subprocess.run(cmd, input=data, capture_output=True, timeout=timeout_seconds,  # noqa: S603
+                              cwd=str(_APP_ROOT), check=False)
+    except subprocess.TimeoutExpired:
+        logger.warning("extraction_timeout", extra={"format": file_format})
+        raise FileValidationError("The document is too complex to process within the time limit.",
+                                  code="document_too_complex") from None
+    try:
+        result = json.loads(proc.stdout.decode("utf-8"))
+    except (UnicodeDecodeError, json.JSONDecodeError):
+        logger.warning("extraction_worker_failed", extra={"format": file_format, "returncode": proc.returncode})
+        raise FileValidationError("The document needs too much memory or cannot be processed.",
+                                  code="document_too_complex") from None
+    if result.get("ok"):
+        return ExtractedDocument(text=result["text"], file_format=file_format, page_count=result["page_count"],
+                                 warnings=list(result["warnings"]))
+    raise FileValidationError(result.get("message") or "The document cannot be read.",
+                              code=result.get("code") or "corrupted_file")
+
+
+def extract_text(data: bytes, filename: str, *, max_pages: int = 200, max_chars: int = 500_000,
+                 timeout_seconds: float = 30.0, memory_mb: int = 1024) -> ExtractedDocument:
     file_format = detect_format(data, filename)
-    if file_format == "pdf":
-        doc = _extract_pdf(data, max_pages)
-    elif file_format == "docx":
-        doc = _extract_docx(data)
+    if file_format in ("pdf", "docx"):
+        doc = _extract_isolated(file_format, data, max_pages=max_pages, max_chars=max_chars,
+                                timeout_seconds=timeout_seconds, memory_mb=memory_mb)
     else:
         doc = _extract_txt(data)
     if len(doc.text) < _MIN_TEXT_CHARS:

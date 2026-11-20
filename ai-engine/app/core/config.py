@@ -73,6 +73,8 @@ class Settings(BaseSettings):
     max_file_size_mb: float = Field(default=10.0, gt=0, le=100)
     max_pdf_pages: int = Field(default=200, ge=1)
     max_extracted_chars: int = Field(default=500_000, ge=1_000)
+    extraction_timeout_seconds: float = Field(default=30.0, gt=0, le=600)
+    extraction_memory_mb: int = Field(default=1024, ge=0, le=16_384)  # 0 = no limit
     storage_dir: Path = BASE_DIR / "data" / "uploads"
 
     # ── RAG ──────────────────────────────────────────────────────────────────

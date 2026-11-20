@@ -36,7 +36,11 @@ _NAME_LINE_RE = re.compile(r"^\s*(фио|ф\.и\.о\.|имя|name|full\s+name|ca
 _LIKELY_NAME_RE = re.compile(r"^[A-ZА-ЯЁӘҒҚҢӨҰҮҺІ][a-zа-яёәғқңөұүһі'’-]+(\s+[A-ZА-ЯЁӘҒҚҢӨҰҮҺІ][a-zа-яёәғқңөұүһі'’.-]+){1,3}$")
 
 
-def redact_resume(text: str) -> tuple[str, dict[str, int]]:
+def redact_resume(text: str, *, mask_name_line: bool = True) -> tuple[str, dict[str, int]]:
+    """Mask contact details, identifiers and protected characteristics.
+
+    ``mask_name_line=False`` is used for job descriptions, whose first line is a job title.
+    """
     counts: dict[str, int] = {}
 
     def _sub(pattern: re.Pattern[str], repl: str, value: str, key: str) -> str:
@@ -53,7 +57,7 @@ def redact_resume(text: str) -> tuple[str, dict[str, int]]:
     text = _sub(_PHONE_RE, "[redacted: phone]", text, "phone")
     # A first line that looks like a personal name (2-4 capitalised words) is masked.
     lines = text.split("\n")
-    for i, line in enumerate(lines[:3]):
+    for i, line in enumerate(lines[:3] if mask_name_line else []):
         if line.strip() and _LIKELY_NAME_RE.match(line.strip()) and len(line.strip()) < 60:
             lines[i] = "[redacted: name]"
             counts["name"] = counts.get("name", 0) + 1
@@ -106,15 +110,36 @@ def _norm(value: str) -> str:
     return re.sub(r"\s+", " ", value.lower().replace("ё", "е")).strip(" .,;:-–—\"'«»")
 
 
-def evidence_in(source_text: str, evidence: str | None, fallback: str | None = None) -> bool:
-    """True when ``evidence`` (or ``fallback``) literally appears in ``source_text``."""
-    haystack = _norm(source_text)
-    for candidate in (evidence, fallback):
-        if candidate:
-            needle = _norm(candidate)
-            if len(needle) >= 2 and (needle in haystack or (len(needle) > 40 and needle[:40] in haystack)):
-                return True
-    return False
+def evidence_in(source_text: str, evidence: str | None) -> bool:
+    """True when the whole ``evidence`` quote literally appears in ``source_text``."""
+    if not evidence:
+        return False
+    needle = _norm(evidence)
+    return len(needle) >= 2 and needle in _norm(source_text)
+
+
+def verify_skill(source_text: str, name: str, evidence: str | None) -> str | None:
+    """Return a quote proving ``name`` is in the resume, or None.
+
+    The model's quote is kept only if it appears verbatim in the resume AND mentions the
+    skill as a whole word ("Java" does not match "JavaScript"). Otherwise a line from the
+    resume containing the skill is used; if there is none the skill is not confirmed.
+    """
+    pattern = _skill_pattern(name)
+    if evidence and evidence_in(source_text, evidence) and pattern.search(evidence):
+        return evidence
+    match = pattern.search(source_text)
+    return _line_with(source_text, match.start(), match.end()) if match else None
+
+
+def looks_like_resume(text: str) -> bool:
+    """Heuristic: CV-style sections plus contact details, and no vacancy sections."""
+    sections = split_sections(text)
+    cv_sections = sum(1 for key in ("experience", "education", "skills", "summary") if sections.get(key))
+    job_sections = sum(1 for key in ("requirements", "responsibilities", "conditions", "preferred")
+                       if sections.get(key))
+    has_contacts = bool(EMAIL_RE.search(text) or _PHONE_RE.search(text))
+    return cv_sections >= 2 and job_sections == 0 and (has_contacts or cv_sections >= 3)
 
 
 # ── Sections (offline mode) ──────────────────────────────────────────────────

@@ -1,6 +1,8 @@
 # Integration Guide
 
-## 1. Подключение OpenAI API
+## 1. Подключение OpenAI API (переход из mock-режима)
+
+Облачный вариант без терминала — [CLOUD_DEPLOY.md](CLOUD_DEPLOY.md). Локально:
 
 1. Получите ключ в кабинете OpenAI и запишите его **только** в `.env` (или в секреты окружения
    на сервере): `OPENAI_API_KEY=sk-...`. Файл `.env` в `.gitignore`.
@@ -10,6 +12,15 @@
    `PRICE_INPUT_PER_1M_TOKENS`, `PRICE_OUTPUT_PER_1M_TOKENS` (в `PRICE_CURRENCY`). Без них
    `estimated_cost` = `null`, а лимиты расходов не срабатывают.
 4. Проверьте: `GET /health` → `"llm_configured": true`, затем запрос к любому агенту → `"mode": "openai"`.
+
+5. Убедитесь, что `LLM_MODE=openai` (значение по умолчанию). Mock включается только явно `LLM_MODE=mock`.
+6. Первый запрос делайте с вымышленными данными и проверьте в ответе: `mode == "openai"`,
+   `usage.input_tokens > 0`, `usage.estimated_cost` не `null`; в `GET /runs` — запись со статусом `success`.
+
+Модели-рассуждатели (например, семейства o-series/gpt-5) тратят часть `MAX_OUTPUT_TOKENS` на
+внутренние рассуждения: при пустом ответе движок вернёт `502 llm_empty_output` — увеличьте
+`MAX_OUTPUT_TOKENS` (например, до 4000) или используйте `gpt-4.1-mini`. Для них не задавайте
+`OPENAI_TEMPERATURE`.
 
 Если ключ не задан при `LLM_MODE=openai`, запуски возвращают `503 llm_not_configured`
 (и логируются в `agent_runs`). Для проверки архитектуры без ключа: `LLM_MODE=mock`.

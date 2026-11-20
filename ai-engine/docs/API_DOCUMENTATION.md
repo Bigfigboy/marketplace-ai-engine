@@ -34,10 +34,10 @@ JWT claims: `sub` (id пользователя маркетплейса, обя�
 | 404 | `agent_not_found`, `file_not_found`, `run_not_found`, `not_found` | нет объекта **или нет доступа** (чужая компания) |
 | 413 | `file_too_large`, `payload_too_large`, `input_token_limit_exceeded` | превышены размеры |
 | 415 | `unsupported_file_type` | расширение не PDF/DOCX/TXT |
-| 422 | `validation_error`, `message_too_long`, `file_type_mismatch`, `empty_file`, `empty_document`, `corrupted_file`, `encrypted_pdf`, `ocr_required`, `too_many_pages`, `invalid_purpose`, `file_purpose_not_accepted`, `too_many_files`, `resume_required`, `job_description_required`, `one_resume_per_run` | некорректный ввод |
+| 422 | `validation_error`, `message_too_long`, `file_type_mismatch`, `empty_file`, `empty_document`, `corrupted_file`, `encrypted_pdf`, `ocr_required`, `too_many_pages`, `invalid_purpose`, `file_purpose_not_accepted`, `too_many_files`, `resume_required`, `job_description_required`, `one_resume_per_run`, `too_many_job_descriptions`, `job_description_looks_like_resume`, `document_too_complex` | некорректный ввод |
 | 429 | `rate_limited`, `daily_limit_exceeded`, `spend_limit_exceeded`, `company_spend_limit_exceeded` | лимиты (заголовок `Retry-After`) |
 | 500 | `internal_error` | непредвиденная ошибка (детали только в логах) |
-| 502 | `llm_unavailable`, `llm_auth_failed`, `llm_model_not_found`, `llm_bad_request`, `llm_quota_exceeded`, `llm_error`, `llm_invalid_output` | ошибка провайдера ИИ |
+| 502 | `llm_unavailable`, `llm_auth_failed`, `llm_model_not_found`, `llm_bad_request`, `llm_quota_exceeded`, `llm_error`, `llm_invalid_output`, `llm_empty_output` | ошибка провайдера ИИ |
 | 503 | `llm_not_configured`, `llm_rate_limited` | нет `OPENAI_API_KEY` / провайдер ограничивает |
 | 504 | `llm_timeout` | таймаут провайдера |
 
@@ -171,7 +171,9 @@ JWT claims: `sub` (id пользователя маркетплейса, обя�
 
 Проверки: расширение, реальный формат по содержимому (расширение должно совпадать), размер,
 пустые/повреждённые/зашифрованные файлы, PDF без текстового слоя → `ocr_required`,
-ZIP-бомбы в DOCX, лимит страниц PDF. `warnings` может содержать
+ZIP-бомбы в DOCX, лимит страниц PDF. PDF/DOCX разбираются в отдельном процессе с лимитом времени
+(`EXTRACTION_TIMEOUT_SECONDS`) и памяти (`EXTRACTION_MEMORY_MB`); слишком «тяжёлый» документ → `document_too_complex`.
+Лимит размера действует и для запросов без `Content-Length` (chunked). `warnings` может содержать
 `instruction_like_text_detected_will_be_ignored`, `decoded_as_cp1251`, `text_truncated`.
 
 ### `GET /files`, `GET /files/{id}`, `DELETE /files/{id}`

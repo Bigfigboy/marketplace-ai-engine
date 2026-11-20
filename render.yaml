@@ -1,0 +1,40 @@
+# Render Blueprint for a team demo of AI Engine (see ai-engine/docs/CLOUD_DEPLOY.md).
+# Nothing is deployed automatically: a person must create the Blueprint in the Render dashboard.
+services:
+  - type: web
+    name: ai-engine-demo
+    runtime: docker
+    plan: free
+    dockerfilePath: ./ai-engine/Dockerfile
+    dockerContext: ./ai-engine
+    healthCheckPath: /health
+    autoDeploy: false
+    envVars:
+      - key: PORT
+        value: "8000"
+      - key: LLM_MODE
+        value: openai
+      - key: OPENAI_API_KEY
+        sync: false            # entered by hand in the dashboard, never stored in git
+      - key: OPENAI_MODEL
+        value: gpt-4.1-mini
+      - key: PRICE_INPUT_PER_1M_TOKENS
+        sync: false
+      - key: PRICE_OUTPUT_PER_1M_TOKENS
+        sync: false
+      - key: DEMO_API_KEY
+        sync: false            # aie_ + 32+ random characters
+      - key: DEMO_MODE
+        value: "true"
+      - key: DAILY_RUN_LIMIT_PER_USER
+        value: "10"
+      - key: DAILY_SPEND_LIMIT
+        value: "2"
+      - key: COMPANY_DAILY_SPEND_LIMIT
+        value: "1"
+      - key: APP_ENV
+        value: production
+      - key: EXTRACTION_MEMORY_MB     # fits the 512 MB free instance
+        value: "256"
+      - key: CORS_ORIGINS             # demo UI is same-origin; add the marketplace domain later
+        value: ""

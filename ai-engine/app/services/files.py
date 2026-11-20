@@ -72,7 +72,9 @@ def save_upload(db: Session, settings: Settings, principal: Principal, *, filena
                                   code="file_too_large", status_code=413)
     safe_name = sanitize_filename(filename)
     doc = extract_text(data, safe_name, max_pages=settings.max_pdf_pages,
-                       max_chars=settings.max_extracted_chars)
+                       max_chars=settings.max_extracted_chars,
+                       timeout_seconds=settings.extraction_timeout_seconds,
+                       memory_mb=settings.extraction_memory_mb)
 
     record = StoredFile(company_id=principal.company_id, user_id=principal.user_id, purpose=purpose,
                         filename=safe_name, file_format=doc.file_format, size_bytes=len(data),
