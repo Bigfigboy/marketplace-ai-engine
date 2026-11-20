@@ -15,7 +15,7 @@ from sqlalchemy.orm import Session
 from app.agents.base import AgentContext, AgentResult
 from app.agents.registry import AgentRegistry
 from app.core.config import Settings
-from app.core.errors import AppError, LimitExceededError
+from app.core.errors import AppError, LimitExceededError, LLMError
 from app.core.i18n import t
 from app.database.models import AgentRun
 from app.schemas.common import RunRequest, RunResponse, Usage
@@ -24,6 +24,7 @@ from app.security.prompt_guard import detect_override_attempt
 from app.services.files import load_files
 from app.services.language import detect_language
 from app.services.llm import LLMProvider
+from app.services.llm_providers import is_paid_provider
 from app.services.pricing import estimate_cost
 from app.services.quotas import reserve_run
 
@@ -37,6 +38,13 @@ def _persist(db: Session, run: AgentRun) -> None:
     except Exception:  # noqa: BLE001 - logging must never mask the real outcome
         db.rollback()
         logger.error("agent_run_persist_failed", extra={"run_id": run.id})
+
+
+def _cost(settings: Settings, ctx: AgentContext) -> float | None:
+    """Paid providers: tokens x configured prices. Free/local/mock or no call: 0.0."""
+    if is_paid_provider(ctx.llm_mode):
+        return estimate_cost(settings, ctx.input_tokens, ctx.output_tokens) if ctx.input_tokens else None
+    return 0.0
 
 
 def execute_run(*, db: Session, settings: Settings, registry: AgentRegistry, llm: LLMProvider,
@@ -77,7 +85,7 @@ def execute_run(*, db: Session, settings: Settings, registry: AgentRegistry, llm
         if bad:
             raise AppError(f"This agent accepts files with purpose: {', '.join(agent.accepted_file_purposes) or 'none'}.",
                            code="file_purpose_not_accepted", status_code=422, details={"file_ids": bad})
-        reserve_run(db, settings, principal, run)  # atomic limit check + "running" record
+        reserve_run(db, settings, principal, run, paid_provider=is_paid_provider(llm.mode))  # atomic limit check + "running" record
     except AppError as exc:
         run.estimated_cost = None
         _finish("rejected", exc.code)
@@ -98,23 +106,22 @@ def execute_run(*, db: Session, settings: Settings, registry: AgentRegistry, llm
     except AppError as exc:
         run.input_tokens, run.output_tokens = ctx.input_tokens, ctx.output_tokens
         run.llm_mode, run.model = ctx.llm_mode, ctx.model
-        run.estimated_cost = estimate_cost(settings, ctx.input_tokens, ctx.output_tokens) if ctx.input_tokens else None
-        _finish("rejected" if exc.status_code < 500 and not isinstance(exc, LimitExceededError) else "error", exc.code)
+        run.estimated_cost = _cost(settings, ctx)
+        # Provider errors (incl. 429 free-quota) happened after a model call was attempted: "error".
+        client_side = exc.status_code < 500 and not isinstance(exc, (LimitExceededError, LLMError))
+        _finish("rejected" if client_side else "error", exc.code)
         exc.details = {**exc.details, "run_id": run_id}
         raise
     except Exception as exc:  # noqa: BLE001
         logger.error("agent_crashed", extra={"run_id": run_id, "agent": agent.slug,
                                              "error_type": type(exc).__name__})
         run.input_tokens, run.output_tokens = ctx.input_tokens, ctx.output_tokens
-        run.estimated_cost = estimate_cost(settings, ctx.input_tokens, ctx.output_tokens) if ctx.input_tokens else None
+        run.estimated_cost = _cost(settings, ctx)
         _finish("error", "internal_error")
         raise AppError("Internal error while running the agent", code="internal_error", status_code=500,
                        details={"run_id": run_id}) from None
 
-    if ctx.llm_mode == "openai":
-        cost = estimate_cost(settings, ctx.input_tokens, ctx.output_tokens)
-    else:
-        cost = 0.0  # no paid API call was made (mock mode or no LLM call needed)
+    cost = _cost(settings, ctx)
     run.input_tokens, run.output_tokens, run.estimated_cost = ctx.input_tokens, ctx.output_tokens, cost
     run.llm_mode, run.model, run.source_count = ctx.llm_mode, ctx.model, len(result.sources)
     elapsed = _finish(result.status)

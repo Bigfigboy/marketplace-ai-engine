@@ -13,7 +13,7 @@ Marketplace frontend ──► Marketplace backend ──(JWT / API key)──�
           │                                   │                                              │
           │   AgentRegistry ── marketing │ support │ hr  (BaseAgent)                         │
           │                                   │                                              │
-          │   LLM provider: OpenAIProvider (timeouts, bounded retries) │ MockProvider        │
+          │   LLMProvider: OpenAICompatible (openai|groq|gemini|openrouter|ollama) │ Mock    │
           │   Services: extraction, RAG (BM25), hr_tools, quotas, pricing, stats             │
           └──────────────┬─────────────────────────────┬────────────────────────────────────┘
                          │                             │
@@ -86,11 +86,27 @@ Marketplace frontend ──► Marketplace backend ──(JWT / API key)──�
 
 ## LLM-слой
 
-`OpenAIProvider` — официальный SDK, Chat Completions, `max_completion_tokens`, `response_format:
-json_object` для support/hr, `temperature` только если задан. Свои ретраи (SDK `max_retries=0`):
-таймаут, сетевые ошибки, 429 (кроме `insufficient_quota`), 5xx; экспоненциальная задержка с
-джиттером; общий дедлайн запроса (`REQUEST_TIMEOUT_SECONDS`). Ошибки маппятся в стабильные коды.
-Токены берутся из `usage` ответа.
+Единый интерфейс `LLMProvider.complete(LLMRequest, deadline, mock_fn) -> LLMResult`; агенты вызывают
+только `AgentContext.call_llm` и не знают, какой провайдер активен. Реализации:
+
+- `OpenAICompatibleProvider` (`app/services/llm.py`) — официальный SDK `openai`, Chat Completions, для
+  OpenAI, Groq, Gemini (OpenAI-совместимый endpoint), OpenRouter и Ollama. Различия провайдеров —
+  в профилях `app/services/llm_providers.py`: base URL, переменная ключа, модель по умолчанию,
+  `max_tokens`/`max_completion_tokens`, `reasoning_effort` по умолчанию, allowlist бесплатных моделей,
+  лимиты-«предохранители» (RPM/RPD).
+- `MockProvider` — офлайн; `UnconfiguredProvider` — провайдер выбран, но нет ключа или модель вне
+  allowlist: каждый вызов → 503, запрос не отправляется.
+
+Выбор — `LLM_PROVIDER` (legacy `LLM_MODE` учитывается, если `LLM_PROVIDER` не задан). Автоматического
+перехода на другой провайдер/модель нет нигде; OpenRouter — только явно выбранные `:free` модели.
+
+Надёжность: свои ретраи (SDK `max_retries=0`) при таймаутах, сетевых ошибках, 429 и 5xx;
+экспоненциальная задержка с джиттером; `Retry-After`/`retryDelay`/«try again in» учитываются, если
+ожидание ≤ `LLM_MAX_RETRY_AFTER_SECONDS`, иначе клиент получает 429 с `Retry-After`; дневные квоты
+бесплатных тарифов распознаются и не повторяются (`llm_free_quota_exhausted`); общий дедлайн
+(`REQUEST_TIMEOUT_SECONDS`). JSON: `response_format: json_object`, при отказе модели — JSON по промпту;
+блоки `<think>` удаляются; пустой ответ → `llm_empty_output`. Токены — из `usage` ответа; стоимость
+считается только для платного провайдера.
 
 **Почему не OpenAI Agents SDK:** агенты однопроходные, без tools/handoffs; прямой SDK проще,
 даёт точный учёт токенов на запуск, детерминированные ретраи и mock-провайдер. Если появятся
@@ -129,7 +145,9 @@ model, file_count, source_count`. Тексты запросов/ответов *
 
 ## Ограничения MVP
 
-1. **Реальные вызовы OpenAI не выполнялись в среде разработки** (ключа нет). SDK-интеграция
+1. **Реальные вызовы LLM-провайдеров (OpenAI, Groq, Gemini, OpenRouter, Ollama/Qwen) не выполнялись в
+   среде разработки** (ключей нет, реестры моделей Ollama недоступны). Счётчики «предохранителя»
+   бесплатных лимитов — в памяти процесса. SDK-интеграция
    проверена через `httpx.MockTransport`; качество ответов на реальной модели нужно оценить вручную,
    особенно казахский язык (рекомендуется ревью носителем).
 2. RAG лексический (BM25 + префиксный стемминг): синонимы и перефразирования находятся хуже, чем с

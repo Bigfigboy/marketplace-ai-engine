@@ -119,7 +119,7 @@ textarea { resize: vertical; min-height: 70px; }
 .chip.st-escalation_required { color: var(--warn); }
 .chip.st-blocked, .chip.st-error { color: var(--err); }
 .chip.mode-mock { color: var(--warn); font-weight: 600; }
-.chip.mode-openai { color: var(--info); }
+.chip.mode-live { color: var(--info); }
 .sources { margin-top: 8px; font-size: 13px; }
 .sources summary { cursor: pointer; color: var(--muted); }
 .sources ol { margin: 6px 0 0; padding-left: 20px; }

@@ -28,6 +28,8 @@ from app.schemas.common import (
 )
 from app.security.auth import Principal
 from app.services import files as file_service
+from app.services.llm import UnconfiguredProvider
+from app.services.llm_providers import PROFILES
 from app.services.quotas import runs_today
 from app.services.runner import execute_run
 from app.services.stats import agent_usage
@@ -52,12 +54,14 @@ def health(request: Request) -> HealthResponse:
             db.execute(text("SELECT 1"))
     except Exception:  # noqa: BLE001
         db_status = "error"
-    llm_configured = state.settings.llm_mode == "mock" or state.settings.openai_configured
+    llm = state.llm
+    problem = getattr(llm, "code", None) if isinstance(llm, UnconfiguredProvider) else None
+    profile = PROFILES.get(llm.mode)
     return HealthResponse(
-        status="ok" if db_status == "ok" and llm_configured else "degraded",
-        version=__version__, llm_mode=state.settings.llm_mode, llm_configured=llm_configured,
-        model=state.settings.openai_model if state.settings.llm_mode == "openai" else "mock",
-        database=db_status, agents=state.registry.slugs(),
+        status="ok" if db_status == "ok" and problem is None else "degraded",
+        version=__version__, llm_mode=llm.mode, llm_provider=llm.mode,
+        llm_billing=profile.billing if profile else "none", llm_configured=problem is None,
+        llm_problem=problem, model=llm.model, database=db_status, agents=state.registry.slugs(),
     )
 
 

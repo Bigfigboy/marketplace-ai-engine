@@ -143,6 +143,18 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 ```
 
+## LLM-провайдеры и локальные модели
+
+Код провайдеров в репозиторий не входит; движок обращается к их API по сети (или к локальному Ollama).
+Использование регулируется условиями каждого сервиса (возраст: Groq, Google Gemini API, OpenRouter — 18+;
+OpenAI — 13+ с согласия родителей до 18; хостинг Render — 16+), см. `docs/FREE_LLM_PROVIDERS.md`.
+
+| Компонент | Лицензия | Как используется |
+|---|---|---|
+| Ollama | MIT | устанавливается пользователем отдельно / образ `ollama/ollama` в docker-compose (профиль `ollama`) |
+| Qwen3 (`qwen3:*` в Ollama, dense 0.6B–32B) | Apache-2.0 | веса скачивает пользователь; в репозиторий не входят |
+| Qwen2.5 3B и 72B | Qwen License (не Apache) | не используются по умолчанию именно поэтому |
+
 ## Библиотеки (runtime)
 
 Устанавливаются через `requirements.txt`, в репозиторий не копируются.

@@ -34,9 +34,31 @@ class Settings(BaseSettings):
     enable_docs: bool = True
 
     # ── LLM ──────────────────────────────────────────────────────────────────
-    # openai: real OpenAI API (requires OPENAI_API_KEY).
-    # mock:   explicitly labelled offline mode, no external calls, for architecture tests.
+    # LLM_PROVIDER selects the backend: mock | openai | groq | gemini | openrouter | ollama.
+    # There is no automatic fallback between providers or models.
+    llm_provider: Literal["mock", "openai", "groq", "gemini", "openrouter", "ollama"] | None = None
+    # Legacy switch kept for compatibility; used only when LLM_PROVIDER is not set.
     llm_mode: Literal["openai", "mock"] = "openai"
+    llm_model: str | None = None            # overrides the provider-specific model below
+    llm_base_url: str | None = None         # overrides the provider's base URL
+    llm_allowed_models: str | None = None   # comma-separated; replaces the built-in free allowlist
+    llm_requests_per_minute: int | None = Field(default=None, ge=1)  # engine-side guard
+    llm_requests_per_day: int | None = Field(default=None, ge=1)     # engine-side guard
+    llm_max_retry_after_seconds: float = Field(default=20.0, ge=0, le=600)
+    llm_json_mode: Literal["auto", "native", "prompt"] = "auto"
+    # reasoning_effort for thinking models; unset = provider default, "off" = do not send.
+    llm_reasoning_effort: str | None = None
+
+    groq_api_key: SecretStr | None = None
+    groq_model: str | None = None
+    gemini_api_key: SecretStr | None = None
+    gemini_model: str | None = None
+    openrouter_api_key: SecretStr | None = None
+    openrouter_model: str | None = None
+    openrouter_app_url: str | None = None   # optional HTTP-Referer for OpenRouter attribution
+    ollama_base_url: str = "http://localhost:11434/v1"
+    ollama_model: str | None = None
+
     openai_api_key: SecretStr | None = None
     openai_model: str = "gpt-4.1-mini"
     openai_base_url: str | None = None
@@ -101,7 +123,8 @@ class Settings(BaseSettings):
     # Comma-separated list of trusted, in-repository agent modules to load.
     agent_modules: str = "app.agents.marketing,app.agents.support,app.agents.hr"
 
-    @field_validator("openai_api_key", "jwt_secret", "demo_api_key", mode="before")
+    @field_validator("openai_api_key", "jwt_secret", "demo_api_key", "groq_api_key", "gemini_api_key",
+                     "openrouter_api_key", mode="before")
     @classmethod
     def _empty_secret_is_none(cls, value: object) -> object:
         if isinstance(value, str) and not value.strip():
@@ -117,6 +140,17 @@ class Settings(BaseSettings):
         "openai_base_url",
         "jwt_audience",
         "jwt_issuer",
+        "llm_provider",
+        "llm_model",
+        "llm_base_url",
+        "llm_allowed_models",
+        "llm_requests_per_minute",
+        "llm_requests_per_day",
+        "groq_model",
+        "gemini_model",
+        "openrouter_model",
+        "openrouter_app_url",
+        "ollama_model",
         mode="before",
     )
     @classmethod
@@ -138,6 +172,19 @@ class Settings(BaseSettings):
     @property
     def agent_module_list(self) -> list[str]:
         return [m.strip() for m in self.agent_modules.split(",") if m.strip()]
+
+    @property
+    def active_llm_provider(self) -> str:
+        if self.llm_provider:
+            return self.llm_provider
+        return "mock" if self.llm_mode == "mock" else "openai"
+
+    @property
+    def llm_allowed_model_list(self) -> tuple[str, ...] | None:
+        if not self.llm_allowed_models:
+            return None
+        items = tuple(m.strip() for m in self.llm_allowed_models.split(",") if m.strip())
+        return items or None
 
     @property
     def openai_configured(self) -> bool:

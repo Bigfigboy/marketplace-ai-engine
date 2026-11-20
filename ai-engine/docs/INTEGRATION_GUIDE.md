@@ -2,7 +2,9 @@
 
 ## 1. Подключение OpenAI API (переход из mock-режима)
 
-Облачный вариант без терминала — [CLOUD_DEPLOY.md](CLOUD_DEPLOY.md). Локально:
+Бесплатные провайдеры (Groq, Gemini, OpenRouter, локальная Qwen через Ollama) —
+[FREE_LLM_PROVIDERS.md](FREE_LLM_PROVIDERS.md). Облачный вариант без терминала — [CLOUD_DEPLOY.md](CLOUD_DEPLOY.md).
+OpenAI (платно) локально:
 
 1. Получите ключ в кабинете OpenAI и запишите его **только** в `.env` (или в секреты окружения
    на сервере): `OPENAI_API_KEY=sk-...`. Файл `.env` в `.gitignore`.
@@ -13,7 +15,7 @@
    `estimated_cost` = `null`, а лимиты расходов не срабатывают.
 4. Проверьте: `GET /health` → `"llm_configured": true`, затем запрос к любому агенту → `"mode": "openai"`.
 
-5. Убедитесь, что `LLM_MODE=openai` (значение по умолчанию). Mock включается только явно `LLM_MODE=mock`.
+5. Задайте `LLM_PROVIDER=openai` (в `.env.example` по умолчанию `mock`).
 6. Первый запрос делайте с вымышленными данными и проверьте в ответе: `mode == "openai"`,
    `usage.input_tokens > 0`, `usage.estimated_cost` не `null`; в `GET /runs` — запись со статусом `success`.
 

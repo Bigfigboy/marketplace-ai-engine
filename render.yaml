@@ -1,5 +1,10 @@
 # Render Blueprint for a team demo of AI Engine (see ai-engine/docs/CLOUD_DEPLOY.md).
-# Nothing is deployed automatically: a person must create the Blueprint in the Render dashboard.
+# Default: LLM_PROVIDER=mock — runs with NO API keys and costs nothing.
+# To use a free real model later, add in the Render dashboard (Environment), e.g.:
+#   LLM_PROVIDER=groq        + GROQ_API_KEY
+#   LLM_PROVIDER=gemini      + GEMINI_API_KEY
+#   LLM_PROVIDER=openrouter  + OPENROUTER_API_KEY (OPENROUTER_MODEL must end with ":free")
+# Nothing is deployed automatically: a person must create the Blueprint in the dashboard.
 services:
   - type: web
     name: ai-engine-demo
@@ -12,26 +17,16 @@ services:
     envVars:
       - key: PORT
         value: "8000"
-      - key: LLM_MODE
-        value: openai
-      - key: OPENAI_API_KEY
-        sync: false            # entered by hand in the dashboard, never stored in git
-      - key: OPENAI_MODEL
-        value: gpt-4.1-mini
-      - key: PRICE_INPUT_PER_1M_TOKENS
-        sync: false
-      - key: PRICE_OUTPUT_PER_1M_TOKENS
-        sync: false
+      - key: LLM_PROVIDER
+        value: mock
       - key: DEMO_API_KEY
-        sync: false            # aie_ + 32+ random characters
+        sync: false            # aie_ + 32+ random characters; entered once in the dashboard
+      - key: MAX_OUTPUT_TOKENS
+        value: "4000"
       - key: DEMO_MODE
         value: "true"
       - key: DAILY_RUN_LIMIT_PER_USER
         value: "10"
-      - key: DAILY_SPEND_LIMIT
-        value: "2"
-      - key: COMPANY_DAILY_SPEND_LIMIT
-        value: "1"
       - key: APP_ENV
         value: production
       - key: EXTRACTION_MEMORY_MB     # fits the 512 MB free instance

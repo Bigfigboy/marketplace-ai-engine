@@ -42,7 +42,7 @@ else render(body);
  "response": "Markdown", "language": "ru|kk|en",
  "sources": [{"filename": "...", "excerpt": "...", "chunk_index": 0, "score": 1.2, "file_id": "..."}],
  "usage": {"input_tokens": 0, "output_tokens": 0, "total_tokens": 0, "estimated_cost": null, "currency": "USD"},
- "execution_time_ms": 0, "mode": "openai | mock | none", "model": "...", "data": {}, "warnings": []}
+ "execution_time_ms": 0, "mode": "openai | groq | gemini | openrouter | ollama | mock | none", "model": "...", "data": {}, "warnings": []}
 ```
 
 - `response` — Markdown от модели: **рендерить с экранированием HTML** (без `dangerouslySetInnerHTML`
@@ -53,7 +53,8 @@ else render(body);
     он **не отправлен** менеджеру (`delivered: false`) — передачу в CRM делает маркетплейс;
   - `blocked` — запрос отклонён правилами (попытка взлома промпта или запрещённый HR-запрос);
     `response` содержит объяснение для пользователя.
-- `mode: "mock"` — тестовый режим без ИИ, обязательно показывайте плашку «демо-ответ, не ИИ».
+- `mode` — какой провайдер ответил (`groq`, `gemini`, `openrouter`, `ollama`, `openai`) — показывайте
+  вместе с `model`. `mode: "mock"` — тестовый режим без ИИ, обязательно показывайте плашку «демо-ответ, не ИИ».
 - `sources` — для support показывайте как «Источники».
 - `usage.estimated_cost` может быть `null` (тарифы не настроены) — показывайте «н/д».
 
@@ -65,7 +66,7 @@ else render(body);
 | 422 `ocr_required` | «PDF — скан, нужен текстовый PDF/DOCX» |
 | 422 `file_type_mismatch` / 415 | «Поддерживаются PDF, DOCX, TXT» |
 | 413 `file_too_large` | «Файл больше 10 MB» |
-| 429 (+ `Retry-After`) | «Лимит запросов, попробуйте позже» |
+| 429 (+ `Retry-After`) | «Лимит запросов, попробуйте позже» (`llm_free_quota_exhausted` — исчерпан бесплатный лимит AI на сегодня) |
 | 502/503/504 `llm_*` | «AI временно недоступен, повторите» |
 
 ## 5. Чат и история

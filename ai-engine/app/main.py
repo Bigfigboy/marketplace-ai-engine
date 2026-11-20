@@ -72,7 +72,7 @@ def create_app(settings: Settings | None = None, llm: LLMProvider | None = None)
             run_migrations(settings.database_url)
         Path(settings.storage_dir).mkdir(parents=True, exist_ok=True, mode=0o700)
         _seed_demo_key(app)
-        logger.info("startup", extra={"llm_mode": settings.llm_mode, "model": settings.openai_model,
+        logger.info("startup", extra={"llm_provider": app.state.llm.mode, "model": app.state.llm.model,
                                       "agents": ",".join(app.state.registry.slugs())})
         yield
         app.state.engine.dispose()

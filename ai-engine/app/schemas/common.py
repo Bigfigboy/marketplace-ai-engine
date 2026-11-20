@@ -93,8 +93,9 @@ class RunResponse(BaseModel):
     sources: list[Source] = Field(default_factory=list)
     usage: Usage
     execution_time_ms: int
-    mode: Literal["openai", "mock", "none"] = Field(
-        description="openai = real OpenAI API call; mock = offline mock mode; none = no LLM call was needed")
+    mode: Literal["openai", "groq", "gemini", "openrouter", "ollama", "mock", "none"] = Field(
+        description="LLM provider that produced the answer: openai | groq | gemini | openrouter | ollama "
+                    "(real model calls); mock = offline mock mode, not AI; none = no LLM call was needed")
     model: str | None = None
     data: dict[str, Any] | None = Field(default=None, description="Agent-specific structured output")
     warnings: list[str] = Field(default_factory=list)
@@ -191,8 +192,11 @@ class UsageStats(BaseModel):
 class HealthResponse(BaseModel):
     status: Literal["ok", "degraded"]
     version: str
-    llm_mode: str
+    llm_mode: str = Field(description="Active LLM provider (kept for compatibility; same as llm_provider)")
+    llm_provider: str
+    llm_billing: Literal["paid", "free", "local", "none"]
     llm_configured: bool
+    llm_problem: str | None = Field(default=None, description="Why the provider cannot be used, if it cannot")
     model: str
     database: Literal["ok", "error"]
     agents: list[str]

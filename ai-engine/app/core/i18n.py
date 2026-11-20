@@ -6,9 +6,9 @@ SUPPORTED_LANGUAGES: tuple[str, ...] = ("ru", "kk", "en")
 
 MESSAGES: dict[str, dict[str, str]] = {
     "mock_banner": {
-        "ru": "⚠️ MOCK-РЕЖИМ: ответ сформирован локально без вызова OpenAI API и не является результатом работы ИИ.",
-        "kk": "⚠️ MOCK-РЕЖИМІ: жауап OpenAI API шақырылмай, жергілікті түрде жасалды және ЖИ жұмысының нәтижесі емес.",
-        "en": "⚠️ MOCK MODE: this response was produced locally without calling the OpenAI API and is not AI output.",
+        "ru": "⚠️ MOCK-РЕЖИМ: ответ сформирован локально без обращения к языковой модели и не является результатом работы ИИ.",
+        "kk": "⚠️ MOCK-РЕЖИМІ: жауап тілдік модельге жүгінбей, жергілікті түрде жасалды және ЖИ жұмысының нәтижесі емес.",
+        "en": "⚠️ MOCK MODE: this response was produced locally without calling any language model and is not AI output.",
     },
     "blocked_injection": {
         "ru": "Запрос отклонён: он содержит попытку изменить системные правила агента. "

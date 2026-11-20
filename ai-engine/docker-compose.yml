@@ -1,6 +1,9 @@
 # Local demo:            docker compose up --build
 # With PostgreSQL:       docker compose --profile postgres up --build
 #                        (and set DATABASE_URL in .env, see below)
+# With local Qwen:       docker compose --profile ollama up --build
+#                        docker compose exec ollama ollama pull qwen3:4b
+#                        (and LLM_PROVIDER=ollama in .env)
 services:
   ai-engine:
     build: .
@@ -13,6 +16,8 @@ services:
       # DATABASE_URL=postgresql+psycopg://ai_engine:${POSTGRES_PASSWORD}@postgres:5432/ai_engine
       DATABASE_URL: ${DATABASE_URL_DOCKER:-sqlite:////app/data/ai_engine.db}
       STORAGE_DIR: /app/data/uploads
+      # Inside Docker, Ollama is reachable by its service name, not localhost.
+      OLLAMA_BASE_URL: ${OLLAMA_BASE_URL_DOCKER:-http://ollama:11434/v1}
     volumes:
       - engine-data:/app/data
     restart: unless-stopped
@@ -32,6 +37,16 @@ services:
       retries: 10
     restart: unless-stopped
 
+  ollama:
+    image: ollama/ollama:latest
+    profiles: ["ollama"]
+    ports:
+      - "127.0.0.1:11434:11434"
+    volumes:
+      - ollama-data:/root/.ollama
+    restart: unless-stopped
+
 volumes:
   engine-data:
   pg-data:
+  ollama-data:

@@ -10,8 +10,24 @@ MVP движка, через который маркетплейс запуск�
 
 Языки: русский (`ru`), казахский (`kk`), английский (`en`), автоопределение.
 
-> Реальные вызовы OpenAI API в этой среде **не выполнялись** (ключа не было). Интеграция с OpenAI
-> проверена тестами через официальный SDK с имитацией HTTP-ответов. Подробно — `docs/TEST_REPORT.md`.
+## LLM-провайдеры (переключение без изменения кода агентов)
+
+| `LLM_PROVIDER` | Стоимость | Ключ | Модель по умолчанию |
+|---|---|---|---|
+| `mock` | 0, не ИИ | — | — |
+| `groq` | бесплатный план | `GROQ_API_KEY` | `openai/gpt-oss-20b` |
+| `gemini` | бесплатный тариф | `GEMINI_API_KEY` | `gemini-3.5-flash-lite` |
+| `openrouter` | только `:free` модели | `OPENROUTER_API_KEY` | `google/gemma-4-26b-a4b-it:free` |
+| `ollama` | локально (Qwen) | — | `qwen3:4b` |
+| `openai` | **платно**, только явно | `OPENAI_API_KEY` | `gpt-4.1-mini` |
+
+Движок никогда не переключается на другую модель или провайдера автоматически; для бесплатных
+провайдеров действует allowlist моделей и защита от превышения лимитов. Бесплатный запуск, условия
+тарифов и возрастные требования (Groq, Gemini, OpenRouter — 18+) — [docs/FREE_LLM_PROVIDERS.md](docs/FREE_LLM_PROVIDERS.md).
+
+> Реальные вызовы LLM-провайдеров в этой среде **не выполнялись** (ключей нет, реестры моделей Ollama
+> недоступны из песочницы). Интеграция проверена тестами через официальный SDK `openai` с имитацией
+> HTTP-ответов каждого провайдера. Подробно — `docs/TEST_REPORT.md`.
 
 ## Быстрый старт (локально)
 
@@ -24,14 +40,12 @@ pip install -r requirements.txt
 cp .env.example .env
 ```
 
-В `.env` укажите ключ OpenAI и ключ доступа к демо:
+В `.env` укажите ключ доступа к демо и провайдера (по умолчанию `mock` — без ключей):
 
 ```bash
-OPENAI_API_KEY=sk-...                 # ключ только здесь, никогда в коде
-OPENAI_MODEL=gpt-4.1-mini             # любая модель с Chat Completions
 DEMO_API_KEY=aie_<сгенерируйте>       # python -c "import secrets; print('aie_' + secrets.token_urlsafe(32))"
-PRICE_INPUT_PER_1M_TOKENS=...         # цены модели из прайса провайдера (для расчёта стоимости)
-PRICE_OUTPUT_PER_1M_TOKENS=...
+LLM_PROVIDER=groq                     # mock | groq | gemini | openrouter | ollama | openai
+GROQ_API_KEY=gsk_...                  # ключи только в .env / секретах, никогда в коде
 ```
 
 Запуск:
@@ -44,16 +58,20 @@ uvicorn app.main:app --reload --port 8000
 - Демо-интерфейс: http://localhost:8000/demo/
 - Health: http://localhost:8000/health
 
-Без ключа OpenAI можно проверить архитектуру в явно обозначенном mock-режиме:
-`LLM_MODE=mock` (ответы помечены `"mode": "mock"` и баннером «MOCK-РЕЖИМ … не является результатом работы ИИ»).
+Без ключей архитектура проверяется в явно обозначенном mock-режиме `LLM_PROVIDER=mock`
+(ответы помечены `"mode": "mock"` и баннером «MOCK-РЕЖИМ … не является результатом работы ИИ»).
+Локальная модель Qwen: `LLM_PROVIDER=ollama` (см. FREE_LLM_PROVIDERS.md, вариант 3).
 
 ### Docker
 
 ```bash
 cd ai-engine
-cp .env.example .env   # заполните OPENAI_API_KEY, DEMO_API_KEY
+cp .env.example .env   # заполните DEMO_API_KEY и при желании LLM_PROVIDER + ключ
 docker compose up --build
 ```
+
+С локальной Qwen: `docker compose --profile ollama up --build`, затем
+`docker compose exec ollama ollama pull qwen3:4b` и `LLM_PROVIDER=ollama` в `.env`.
 
 С PostgreSQL: `docker compose --profile postgres up --build`, в `.env` задайте `POSTGRES_PASSWORD` и
 `DATABASE_URL_DOCKER=postgresql+psycopg://ai_engine:<пароль>@postgres:5432/ai_engine`.
@@ -98,7 +116,7 @@ curl -s localhost:8000/agents/hr/run -H "Authorization: Bearer $KEY" -H "Content
 ## Тесты
 
 ```bash
-pytest                       # 94 теста, SQLite, без сети и без реального OpenAI
+pytest                       # 128 тестов, SQLite, без сети и без реального OpenAI
 TEST_DATABASE_URL=postgresql+psycopg://user@host:5432/test_db pytest   # тот же набор на PostgreSQL
 ```
 
@@ -131,6 +149,7 @@ ai-engine/
 - [API_DOCUMENTATION.md](docs/API_DOCUMENTATION.md) — endpoints, схемы, коды ошибок
 - [INTEGRATION_GUIDE.md](docs/INTEGRATION_GUIDE.md) — подключение фронтенда маркетплейса, новые агенты, PostgreSQL, деплой
 - [ARCHITECTURE.md](docs/ARCHITECTURE.md) — устройство движка, безопасность, масштабирование
+- [FREE_LLM_PROVIDERS.md](docs/FREE_LLM_PROVIDERS.md) — бесплатные провайдеры, лимиты, возраст, пошаговый запуск
 - [CLOUD_DEPLOY.md](docs/CLOUD_DEPLOY.md) — запуск в облаке (Render) без терминала
 - [FRONTEND_QUICKSTART.md](docs/FRONTEND_QUICKSTART.md) — памятка для frontend-разработчика
 - [TEST_REPORT.md](docs/TEST_REPORT.md) — фактические результаты тестов
@@ -138,7 +157,7 @@ ai-engine/
 
 ## Известные ограничения
 
-См. раздел «Ограничения» в [ARCHITECTURE.md](docs/ARCHITECTURE.md#ограничения-mvp). Кратко: реальный
-OpenAI не тестировался в этой среде; RAG лексический (BM25), без эмбеддингов; rate limit в памяти
+См. раздел «Ограничения» в [ARCHITECTURE.md](docs/ARCHITECTURE.md#ограничения-mvp). Кратко: реальные
+LLM-провайдеры не вызывались в этой среде; RAG лексический (BM25), без эмбеддингов; rate limit в памяти
 одного процесса; нет OCR; интеграции с CRM/helpdesk для передачи обращений менеджеру нет; качество
 казахского языка зависит от выбранной модели и требует проверки носителем языка.

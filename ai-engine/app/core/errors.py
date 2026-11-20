@@ -74,9 +74,11 @@ class LLMError(AppError):
     code = "llm_error"
 
     def __init__(self, message: str, *, code: str = "llm_error", status_code: int = 502,
-                 retryable: bool = False) -> None:
-        super().__init__(message, code=code, status_code=status_code)
+                 retryable: bool = False, retry_after: float | None = None) -> None:
+        headers = {"Retry-After": str(max(1, int(retry_after + 0.999)))} if retry_after is not None else None
+        super().__init__(message, code=code, status_code=status_code, headers=headers)
         self.retryable = retryable
+        self.retry_after = retry_after
 
 
 def error_body(code: str, message: str, **extra: Any) -> dict[str, Any]:

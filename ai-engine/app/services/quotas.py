@@ -13,6 +13,7 @@ from app.core.config import Settings
 from app.core.errors import LimitExceededError
 from app.database.models import AgentRun
 from app.security.auth import Principal
+from app.services.llm_providers import is_paid_provider
 from app.services.pricing import estimate_cost
 
 # Runs rejected before execution (validation, quota) do not consume quota.
@@ -68,7 +69,8 @@ _RESERVE_LOCK = threading.Lock()
 _PG_LOCK_KEY = 0x41495F454E47  # arbitrary constant ("AI_ENG")
 
 
-def reserve_run(db: Session, settings: Settings, principal: Principal, run: AgentRun) -> None:
+def reserve_run(db: Session, settings: Settings, principal: Principal, run: AgentRun, *,
+                paid_provider: bool | None = None) -> None:
     """Atomically check limits and persist ``run`` as ``running`` with a worst-case cost reservation.
 
     The reservation (max input + max output tokens at configured prices) counts against
@@ -80,7 +82,10 @@ def reserve_run(db: Session, settings: Settings, principal: Principal, run: Agen
                 db.execute(text("SELECT pg_advisory_xact_lock(:key)"), {"key": _PG_LOCK_KEY})
             check_quotas(db, settings, principal)
             run.status = "running"
-            run.estimated_cost = estimate_cost(settings, settings.max_input_tokens, settings.max_output_tokens)
+            # Reserve the worst-case cost only for a paid provider; free/local/mock cost nothing.
+            run.estimated_cost = (estimate_cost(settings, settings.max_input_tokens, settings.max_output_tokens)
+                                  if (paid_provider if paid_provider is not None
+                                      else is_paid_provider(settings.active_llm_provider)) else 0.0)
             db.add(run)
             db.commit()  # also releases the advisory lock
         except Exception:

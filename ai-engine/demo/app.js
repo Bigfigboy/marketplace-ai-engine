@@ -117,8 +117,8 @@ async function loadHealth() {
     const h = await api("/health");
     const box = $("health");
     box.className = "health " + h.status;
-    box.textContent = `${h.status === "ok" ? "●" : "▲"} ${h.status} · LLM: ${h.llm_mode}` +
-      (h.llm_configured ? ` (${h.model})` : " — ключ не настроен") + ` · БД: ${h.database}`;
+    box.textContent = `${h.status === "ok" ? "●" : "▲"} ${h.status} · LLM: ${h.llm_provider}` +
+      (h.llm_configured ? ` (${h.model}, ${h.llm_billing})` : ` — не настроен: ${h.llm_problem}`) + ` · БД: ${h.database}`;
   } catch (e) {
     $("health").textContent = "Сервер недоступен";
   }
@@ -262,7 +262,8 @@ function renderMessage(m) {
   body.append(renderMarkdown(r.response));
   const meta = el("div", { class: "meta-row" },
     el("span", { class: `chip st-${r.status}` }, `статус: ${r.status}`),
-    el("span", { class: `chip mode-${r.mode}` }, r.mode === "mock" ? "MOCK — не ИИ" : r.mode === "openai" ? `OpenAI · ${r.model}` : "без вызова LLM"),
+    el("span", { class: `chip mode-${r.mode === "mock" || r.mode === "none" ? r.mode : "live"}` },
+      r.mode === "mock" ? "MOCK — не ИИ" : r.mode === "none" ? "без вызова LLM" : `${r.mode} · ${r.model}`),
     el("span", { class: "chip" }, `язык: ${r.language}`),
     el("span", { class: "chip" }, `⏱ ${r.execution_time_ms} мс`),
     el("span", { class: "chip" }, `токены: ${r.usage.input_tokens} вх / ${r.usage.output_tokens} вых`),

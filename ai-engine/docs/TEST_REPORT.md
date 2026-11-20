@@ -1,10 +1,13 @@
 # Test Report
 
-Дата: 20.11.2026 (итерация 2: после независимого ревью кода). Все результаты ниже — фактический вывод
+Дата: 20.11.2026 (итерация 3: мультипровайдерный LLM-слой — Groq, Gemini, OpenRouter, Ollama/Qwen). Все результаты ниже — фактический вывод
 команд в среде разработки.
 
 ## Важно: что проверено, а что нет
 
+- **Ни один реальный LLM-провайдер (OpenAI, Groq, Gemini, OpenRouter) не вызывался**, и реальная модель
+  Qwen через Ollama не запускалась: ключей нет, а ollama.com / registry.ollama.ai / huggingface.co закрыты
+  сетевой политикой песочницы. Провайдеры проверены тем же способом, что и OpenAI (ниже).
 - **Реальный OpenAI API не вызывался** — в среде разработки не было `OPENAI_API_KEY`, а отправлять
   данные во внешние API без ключа и разрешения нельзя. Поэтому:
   - логика агентов проверена с `ScriptedLLM` (тестовый двойник, который записывает точные сообщения,
@@ -23,21 +26,21 @@
 
 ```
 $ cd ai-engine && python -m pytest
-94 passed in 23.01s
+128 passed in 27.88s        # 94 прежних + 34 новых (tests/test_llm_providers.py)
 ```
 
 ### Тот же набор на PostgreSQL 16 (локальный сервер)
 
 ```
 $ TEST_DATABASE_URL=postgresql+psycopg://postgres@127.0.0.1:5433/ai_engine_test python -m pytest
-94 passed in 27.19s
+128 passed in 30.36s
 ```
 
 ### Другие версии Python
 
 ```
-Python 3.11.18 (uv venv):              94 passed in 25.79s
-Python 3.12.16 (внутри Docker-образа): 94 passed in 33.01s
+Python 3.11.18 (uv venv):              128 passed in 26.71s
+Python 3.12.16 (внутри Docker-образа): 128 passed in 36.75s
 ```
 
 ### Линтер и аудит зависимостей
@@ -66,6 +69,35 @@ No known vulnerabilities found
 базы (`escalation_required`, черновик обращения «не отправлен») → загрузка вымышленного резюме →
 сводка HR → пост для marketing на казахском. Ошибок в консоли браузера нет; ширина 390 px — без
 горизонтальной прокрутки. Скрипт `examples/curl_examples.sh` пройден целиком против запущенного сервера.
+
+## Мультипровайдерный LLM-слой (итерация 3)
+
+Все 34 теста в `tests/test_llm_providers.py` используют официальный SDK `openai` с `httpx.MockTransport`,
+который имитирует OpenAI-совместимый API каждого провайдера, включая их форматы ошибок лимитов.
+Ключи фиктивные, данные вымышленные.
+
+| Требование | Тест(ы) | Результат |
+|---|---|---|
+| Единый интерфейс, переключение без изменения агентов | `test_agents_work_unchanged_with_free_providers[groq/gemini/openrouter/ollama]` — все три агента через API | ✅ |
+| Корректный запрос каждому провайдеру (URL, модель, ключ, `max_tokens`/`max_completion_tokens`, `reasoning_effort`, заголовки OpenRouter, без `models`) | `test_each_provider_sends_openai_compatible_request[*]` (5 провайдеров) | ✅ |
+| Конфигурация через env, legacy `LLM_MODE`, нет ключа → 503 с именем переменной | `test_build_provider_from_settings`, `test_llm_model_override_and_custom_ollama_url`, `test_health_reports_provider` | ✅ |
+| OpenRouter — только явно выбранные `:free`; роутеры и платные запрещены даже через allowlist | `test_openrouter_only_explicit_free_models` | ✅ |
+| Allowlist бесплатных моделей Groq/Gemini | `test_free_providers_reject_models_outside_allowlist` | ✅ |
+| Нет автоматического переключения при исчерпании квоты | `test_daily_quota_is_not_retried_and_never_switches_model` (1 запрос, та же модель) | ✅ |
+| Лимиты бесплатных тарифов: `Retry-After`, Gemini `retryDelay`, Groq «try again in 7m12.5s», дневные квоты, предохранитель RPM/RPD движка, 413 | `test_short_retry_after_is_honored`, `test_long_retry_after_fails_fast_with_header`, `test_groq_daily_token_limit_message`, `test_gemini_resource_exhausted_retry_delay`, `test_gemini_daily_quota_detected`, `test_engine_side_guard_stops_before_provider_limit`, `test_request_too_large_for_free_tier`, `test_free_quota_error_reaches_client_with_retry_after` | ✅ |
+| Платный OpenAI без «бесплатного» предохранителя; стоимость бесплатных = 0 | `test_paid_openai_has_no_engine_side_free_guard`, `test_agents_work_unchanged_with_free_providers` | ✅ |
+| JSON-совместимость: чистый JSON, ```json, `<think>` (Qwen), текст вокруг; отказ от `response_format` → JSON по промпту; отказ от `reasoning_effort` | `test_json_output_variants_parse[*]`, `test_strip_reasoning`, `test_json_mode_unsupported_falls_back_to_prompt_mode`, `test_reasoning_effort_dropped_when_unsupported`, `test_reasoning_effort_can_be_disabled` | ✅ |
+| Ollama не запущена → понятная ошибка | `test_ollama_not_running` | ✅ |
+| Render в mock без ключей | `test_render_mock_mode_needs_no_api_key`; Docker-контейнер с переменными из `render.yaml` (без ключей): `/health` → ok, все три агента → `success`, `mode: mock`, стоимость 0; с `LLM_PROVIDER=groq` без ключа → `degraded`, `llm_problem: llm_not_configured` | ✅ |
+| Безопасность, авторизация, изоляция без изменений | все 94 прежних теста (в т.ч. изоляция, лимиты, инъекции, HR) | ✅ |
+
+Новые тесты нашли и помогли исправить два бага: неверный разбор «7m12.5s» из сообщения Groq и запись
+ошибок лимита провайдера как `rejected` (такие запуски не учитывались в квоте, хотя запрос к модели
+уже был отправлен). Теперь они записываются как `error`.
+
+Условия бесплатных тарифов, ID моделей и возрастные требования сверены по официальной документации на
+20.11.2026 через поиск по официальным доменам (прямое чтение страниц console.groq.com и ai.google.dev
+было недоступно). Источники и список непроверенного — в `docs/FREE_LLM_PROVIDERS.md`.
 
 ## Покрытие требований ТЗ
 

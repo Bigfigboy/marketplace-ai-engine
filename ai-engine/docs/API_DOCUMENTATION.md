@@ -37,8 +37,11 @@ JWT claims: `sub` (id пользователя маркетплейса, обя�
 | 422 | `validation_error`, `message_too_long`, `file_type_mismatch`, `empty_file`, `empty_document`, `corrupted_file`, `encrypted_pdf`, `ocr_required`, `too_many_pages`, `invalid_purpose`, `file_purpose_not_accepted`, `too_many_files`, `resume_required`, `job_description_required`, `one_resume_per_run`, `too_many_job_descriptions`, `job_description_looks_like_resume`, `document_too_complex` | некорректный ввод |
 | 429 | `rate_limited`, `daily_limit_exceeded`, `spend_limit_exceeded`, `company_spend_limit_exceeded` | лимиты (заголовок `Retry-After`) |
 | 500 | `internal_error` | непредвиденная ошибка (детали только в логах) |
+| 429 | `llm_rate_limited`, `llm_free_quota_exhausted` | лимит бесплатного тарифа LLM-провайдера (или «предохранитель» движка); `Retry-After`; модель не меняется |
+| 413 | `llm_request_too_large` | запрос превышает лимит токенов модели/бесплатного тарифа |
+| 503 | `llm_model_not_allowed` | модель не в allowlist бесплатных моделей (OpenRouter — только `:free`) |
 | 502 | `llm_unavailable`, `llm_auth_failed`, `llm_model_not_found`, `llm_bad_request`, `llm_quota_exceeded`, `llm_error`, `llm_invalid_output`, `llm_empty_output` | ошибка провайдера ИИ |
-| 503 | `llm_not_configured`, `llm_rate_limited` | нет `OPENAI_API_KEY` / провайдер ограничивает |
+| 503 | `llm_not_configured` | нет ключа выбранного провайдера (`OPENAI_API_KEY`, `GROQ_API_KEY`, ...) |
 | 504 | `llm_timeout` | таймаут провайдера |
 
 Ошибки запуска агента содержат `details.run_id` — запись в `agent_runs` создаётся и для ошибок.
@@ -48,10 +51,13 @@ JWT claims: `sub` (id пользователя маркетплейса, обя�
 ### `GET /health` (публичный)
 
 ```json
-{"status": "ok", "version": "1.0.0", "llm_mode": "openai", "llm_configured": true,
- "model": "gpt-4.1-mini", "database": "ok", "agents": ["marketing", "support", "hr"]}
+{"status": "ok", "version": "1.0.0", "llm_mode": "groq", "llm_provider": "groq", "llm_billing": "free",
+ "llm_configured": true, "llm_problem": null, "model": "openai/gpt-oss-20b", "database": "ok",
+ "agents": ["marketing", "support", "hr"]}
 ```
-`status = degraded`, если БД недоступна или не задан ключ OpenAI в режиме `openai`.
+`status = degraded`, если БД недоступна или выбранный провайдер не может использоваться
+(`llm_problem`: `llm_not_configured` — нет ключа, `llm_model_not_allowed` — модель вне allowlist).
+`llm_billing`: `paid` | `free` | `local` | `none`.
 
 ### `GET /agents`, `GET /agents/{slug}`
 
@@ -112,9 +118,11 @@ JWT claims: `sub` (id пользователя маркетплейса, обя�
 
 - `status`: `success` | `escalation_required` (support: нет информации в базе) | `blocked`
   (попытка prompt injection или запрещённый HR-запрос; LLM не вызывается) | ошибки — см. HTTP-коды.
-- `mode`: `openai` — реальный вызов API; `mock` — офлайн-режим, **не ИИ**; `none` — LLM не вызывался.
+- `mode`: провайдер, сформировавший ответ — `openai` | `groq` | `gemini` | `openrouter` | `ollama`
+  (реальный вызов модели); `mock` — офлайн-режим, **не ИИ**; `none` — LLM не вызывался.
 - `usage` — фактические токены из ответа провайдера; `estimated_cost` = токены × тарифы из
-  конфигурации (`null`, если тарифы не заданы; `0.0`, если платного вызова не было).
+  конфигурации для платного `openai` (`null`, если тарифы не заданы); для бесплатных/локальных
+  провайдеров и mock всегда `0.0`.
 - `sources` (support): `[{file_id, filename, chunk_index, score, excerpt}]`.
 
 #### Опции агентов
