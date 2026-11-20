@@ -1,0 +1,131 @@
+### AI Engine — example requests (VS Code REST Client / JetBrains HTTP Client)
+@base = http://localhost:8000
+@key = aie_REPLACE_ME
+
+### Health (public)
+GET {{base}}/health
+
+### List agents
+GET {{base}}/agents
+Authorization: Bearer {{key}}
+
+### Agent metadata
+GET {{base}}/agents/hr
+Authorization: Bearer {{key}}
+
+### Marketing — RU content plan
+POST {{base}}/agents/marketing/run
+Authorization: Bearer {{key}}
+Content-Type: application/json
+
+{"message": "Создай контент-план для кофейни в Алматы", "language": "ru", "file_ids": []}
+
+### Marketing — KK (language auto-detected) with options
+POST {{base}}/agents/marketing/run
+Authorization: Bearer {{key}}
+Content-Type: application/json
+
+{"message": "Кофеханаға арналған Instagram және Telegram посттарын жазыңыз",
+ "options": {"task": "social_posts", "platforms": ["instagram", "telegram"], "city": "Астана", "budget_kzt": 150000}}
+
+### Marketing — commercial proposal (EN)
+POST {{base}}/agents/marketing/run
+Authorization: Bearer {{key}}
+Content-Type: application/json
+
+{"message": "Draft a commercial proposal for corporate coffee catering", "language": "en",
+ "options": {"task": "commercial_offer", "business_name": "Fictional Coffee"}}
+
+### Upload knowledge base (support)
+POST {{base}}/files/upload
+Authorization: Bearer {{key}}
+Content-Type: multipart/form-data; boundary=b
+
+--b
+Content-Disposition: form-data; name="purpose"
+
+knowledge_base
+--b
+Content-Disposition: form-data; name="file"; filename="kb_coffee_ru.txt"
+Content-Type: text/plain
+
+< ./files/kb_coffee_ru.txt
+--b--
+
+### Support — question answered from the knowledge base (with sources)
+POST {{base}}/agents/support/run
+Authorization: Bearer {{key}}
+Content-Type: application/json
+
+{"message": "Сколько стоит доставка по Алматы?"}
+
+### Support — complaint
+POST {{base}}/agents/support/run
+Authorization: Bearer {{key}}
+Content-Type: application/json
+
+{"message": "Мне неправильно приготовили напиток, что вы можете сделать?", "options": {"mode": "complaint"}}
+
+### Support — not in knowledge base -> escalation_required
+POST {{base}}/agents/support/run
+Authorization: Bearer {{key}}
+Content-Type: application/json
+
+{"message": "Есть ли у вас парковка?"}
+
+### Upload fictional resume (hr)
+POST {{base}}/files/upload
+Authorization: Bearer {{key}}
+Content-Type: multipart/form-data; boundary=b
+
+--b
+Content-Disposition: form-data; name="purpose"
+
+resume
+--b
+Content-Disposition: form-data; name="file"; filename="resume_fictional_ru.docx"
+Content-Type: application/vnd.openxmlformats-officedocument.wordprocessingml.document
+
+< ./files/resume_fictional_ru.docx
+--b--
+
+### HR — resume summary (replace FILE_ID)
+POST {{base}}/agents/hr/run
+Authorization: Bearer {{key}}
+Content-Type: application/json
+
+{"message": "Сделай сводку резюме", "file_ids": ["FILE_ID"]}
+
+### HR — requirements vs. resume evidence
+POST {{base}}/agents/hr/run
+Authorization: Bearer {{key}}
+Content-Type: application/json
+
+{"message": "Сопоставь требования вакансии с резюме", "file_ids": ["FILE_ID"],
+ "options": {"task": "requirements_check", "job_description": "Требования\n- SQL\n- Python\n- Tableau"}}
+
+### HR — interview questions
+POST {{base}}/agents/hr/run
+Authorization: Bearer {{key}}
+Content-Type: application/json
+
+{"message": "Подготовь 8 вопросов для собеседования аналитика данных", "options": {"question_count": 8}}
+
+### HR — prohibited request -> status "blocked"
+POST {{base}}/agents/hr/run
+Authorization: Bearer {{key}}
+Content-Type: application/json
+
+{"message": "Ранжируй кандидатов и скажи, кого отклонить"}
+
+### Runs and statistics
+GET {{base}}/runs?limit=10
+Authorization: Bearer {{key}}
+
+###
+GET {{base}}/stats/agents?days=30
+Authorization: Bearer {{key}}
+
+### Delete a file
+DELETE {{base}}/files/FILE_ID
+Authorization: Bearer {{key}}

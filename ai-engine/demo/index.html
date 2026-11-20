@@ -1,0 +1,86 @@
+<!doctype html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>AI Engine Demo</title>
+  <link rel="stylesheet" href="styles.css">
+  <script src="app.js" defer></script>
+</head>
+<body>
+  <header class="topbar">
+    <div class="brand">
+      <span class="logo" aria-hidden="true">◆</span>
+      <div>
+        <h1>AI Engine — технический демо-стенд</h1>
+        <p class="subtitle">Проверка агентов маркетплейса через единый API. Не является интерфейсом маркетплейса.</p>
+      </div>
+    </div>
+    <div class="health" id="health" aria-live="polite">…</div>
+  </header>
+
+  <main class="layout">
+    <aside class="sidebar">
+      <section class="panel">
+        <h2>Доступ</h2>
+        <label for="apiKey">API-ключ (aie_…) или JWT</label>
+        <div class="row">
+          <input id="apiKey" type="password" autocomplete="off" placeholder="aie_..." spellcheck="false">
+          <button id="saveKey" class="btn">OK</button>
+        </div>
+        <p class="hint">Ключ хранится только в sessionStorage этой вкладки.</p>
+      </section>
+
+      <section class="panel">
+        <h2>Агенты</h2>
+        <div id="agents" class="agents"><p class="hint">Введите ключ, чтобы загрузить агентов.</p></div>
+      </section>
+
+      <section class="panel">
+        <h2>Язык ответа</h2>
+        <select id="language">
+          <option value="auto">Авто (определить)</option>
+          <option value="ru">Русский — ru</option>
+          <option value="kk">Қазақша — kk</option>
+          <option value="en">English — en</option>
+        </select>
+      </section>
+
+      <section class="panel">
+        <h2>Файлы</h2>
+        <form id="uploadForm" class="upload">
+          <input id="fileInput" type="file" accept=".pdf,.docx,.txt" required>
+          <select id="purpose">
+            <option value="knowledge_base">База знаний (support)</option>
+            <option value="resume">Резюме (hr)</option>
+            <option value="job_description">Вакансия (hr)</option>
+            <option value="brief">Бриф (marketing)</option>
+          </select>
+          <button class="btn" type="submit">Загрузить</button>
+        </form>
+        <p class="hint">PDF, DOCX, TXT до 10 MB. Используйте только вымышленные данные.</p>
+        <div id="uploadStatus" class="status-line" aria-live="polite"></div>
+        <ul id="files" class="files"></ul>
+      </section>
+    </aside>
+
+    <section class="chat panel">
+      <div class="chat-head">
+        <div>
+          <h2 id="chatTitle">Выберите агента</h2>
+          <p id="chatDesc" class="hint"></p>
+        </div>
+        <button id="clearChat" class="btn ghost" type="button">Очистить</button>
+      </div>
+      <div id="messages" class="messages" aria-live="polite"></div>
+      <form id="chatForm" class="composer">
+        <textarea id="message" rows="3" maxlength="8000" placeholder="Например: Создай контент-план для кофейни в Алматы" required></textarea>
+        <div class="composer-actions">
+          <span id="selectedFiles" class="hint"></span>
+          <button id="sendBtn" class="btn primary" type="submit" disabled>Отправить</button>
+        </div>
+      </form>
+    </section>
+  </main>
+</body>
+</html>
