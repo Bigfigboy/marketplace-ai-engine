@@ -48,7 +48,17 @@ LLM_PROVIDER=groq                     # mock | groq | gemini | openrouter | olla
 GROQ_API_KEY=gsk_...                  # ключи только в .env / секретах, никогда в коде
 ```
 
-Запуск:
+Windows 11 (PowerShell):
+
+```powershell
+cd ai-engine
+py -3.12 -m venv .venv
+.\.venv\Scripts\Activate.ps1      # если запрещено: Set-ExecutionPolicy -Scope CurrentUser RemoteSigned
+pip install -r requirements.txt
+copy .env.example .env
+```
+
+Запуск (одинаково на всех ОС, из папки `ai-engine`):
 
 ```bash
 uvicorn app.main:app --reload --port 8000
@@ -116,9 +126,12 @@ curl -s localhost:8000/agents/hr/run -H "Authorization: Bearer $KEY" -H "Content
 ## Тесты
 
 ```bash
-pytest                       # 128 тестов, SQLite, без сети и без реального OpenAI
+pytest                       # 145 тестов (3 из них только для Windows), SQLite, без сети и без реальных LLM
 TEST_DATABASE_URL=postgresql+psycopg://user@host:5432/test_db pytest   # тот же набор на PostgreSQL
 ```
+
+На Windows: `python -m pytest`. GitHub Actions (`.github/workflows/ai-engine-tests.yml`) запускает набор
+на `ubuntu-latest` и `windows-latest` при каждом пуше в `ai-engine/`.
 
 ## Структура
 

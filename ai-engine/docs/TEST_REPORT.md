@@ -1,6 +1,6 @@
 # Test Report
 
-Дата: 20.11.2026 (итерация 3: мультипровайдерный LLM-слой — Groq, Gemini, OpenRouter, Ollama/Qwen). Все результаты ниже — фактический вывод
+Дата: 20.11.2026 (итерация 4: исправление загрузки PDF/DOCX на Windows 11; итерация 3 — мультипровайдерный LLM-слой). Все результаты ниже — фактический вывод
 команд в среде разработки.
 
 ## Важно: что проверено, а что нет
@@ -69,6 +69,36 @@ No known vulnerabilities found
 базы (`escalation_required`, черновик обращения «не отправлен») → загрузка вымышленного резюме →
 сводка HR → пост для marketing на казахском. Ошибок в консоли браузера нет; ширина 390 px — без
 горизонтальной прокрутки. Скрипт `examples/curl_examples.sh` пройден целиком против запущенного сервера.
+
+## Windows 11: ошибка загрузки PDF/DOCX (итерация 4)
+
+**Симптом (ручное тестирование, Windows 11, Python 3.12):** любой PDF, даже на 1.5 КБ, давал
+`document_too_complex: The document needs too much memory or cannot be processed.`
+
+**Точная причина** (`app/services/extract_worker.py`, прежняя версия): воркер выполнял `import resource`
+до блока обработки ошибок. Модуль `resource` существует только в Unix, поэтому на Windows воркер падал
+с `ModuleNotFoundError`, stdout оставался пустым, а родитель (`extraction._extract_isolated`) трактовал
+любой нечитаемый ответ как `document_too_complex`. Вторая, скрытая ошибка: воркер писал JSON с
+кириллицей в stdout, а на Windows канал кодируется ANSI-кодовой страницей (cp1251/cp1252): казахские
+буквы (`Қ`, `ә`, `₸`) роняли воркер (`UnicodeEncodeError`), русский текст приходил в cp1251 и не
+декодировался как UTF-8. Обе причины воспроизведены на Linux имитацией Windows (блокировка `resource`
+через `sitecustomize`, `PYTHONIOENCODING=cp1251`); новые тесты падают на старом коде (14 из 14) и
+проходят на исправленном. Дополнительно найдено: файлы сохранялись `os.open` без `O_BINARY` — на Windows
+CRT заменяет `\n` на `\r\n` и портит сохранённый оригинал.
+
+**Исправление:** лимит памяти по платформе — `RLIMIT_AS` на Unix и **Job Object c `ProcessMemoryLimit`** на
+Windows (защита не отключена); ASCII-JSON в stdout байтами; JSON-ответ при любом сбое; явное окружение
+воркера (`PYTHONPATH`, UTF-8), без консольного окна на Windows; сбой воркера → `500
+document_processing_failed` (а не «документ слишком сложный»); `O_BINARY` при записи; импорт FastAPI в
+`app/core/errors.py` ленивый (старт воркера ~0.05 с вместо ~0.3 с). Таймаут, лимит памяти, проверки
+ZIP-бомб и DoS-тесты (`tests/test_review_regressions.py`) — без изменений и проходят.
+
+```
+Linux, Python 3.13:  142 passed, 3 skipped (Windows-only)
+Linux, Python 3.11:  142 passed, 3 skipped
+PostgreSQL 16:       142 passed, 3 skipped
+Windows (GitHub Actions windows-latest, Python 3.12): результат — в следующем коммите отчёта, run 44826751737
+```
 
 ## Мультипровайдерный LLM-слой (итерация 3)
 
