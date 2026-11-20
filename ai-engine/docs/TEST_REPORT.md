@@ -1,6 +1,6 @@
 # Test Report
 
-Дата: 20.11.2026 (итерация 5: исправление анализа резюме HR Assistant; итерация 4 — загрузка PDF/DOCX на Windows 11; итерация 3 — мультипровайдерный LLM-слой). Все результаты ниже — фактический вывод
+Дата: 20.11.2026 (итерация 6: подготовка к интеграции с Backend 2; итерация 5 — исправление анализа резюме HR Assistant; итерация 4 — загрузка PDF/DOCX на Windows 11; итерация 3 — мультипровайдерный LLM-слой). Все результаты ниже — фактический вывод
 команд в среде разработки.
 
 ## Важно: что проверено, а что нет
@@ -69,6 +69,27 @@ No known vulnerabilities found
 базы (`escalation_required`, черновик обращения «не отправлен») → загрузка вымышленного резюме →
 сводка HR → пост для marketing на казахском. Ошибок в консоли браузера нет; ширина 390 px — без
 горизонтальной прокрутки. Скрипт `examples/curl_examples.sh` пройден целиком против запущенного сервера.
+
+## Подготовка к интеграции с Backend 2 (итерация 6)
+
+Логика движка не менялась. Добавлены интеграционные документы (`AI_ENGINE_HANDOFF.md`, `API_CONTRACT.md`,
+`SUPABASE_INTEGRATION.md`, `INTEGRATION_CHECKLIST.md`) и 17 контрактных тестов
+`tests/test_backend2_contract.py`: сырой токен Supabase отклоняется; engine token от Backend 2 проходит
+полный путь (агенты → загрузка KB → support → `GET /runs`), ключи ответа зафиксированы; сопоставление ролей
+(`business/developer/authenticated` → `member`); изоляция по `company_id` (один `sub` в двух бизнесах);
+просроченный токен, чужие `aud`/`iss`/подпись, нет `exp`/`company_id` → 401; формат ошибок с `run_id`,
+`Retry-After`; `kk` принимается, `kz` → 422.
+
+Проверено вручную на PostgreSQL 16: при `DATABASE_URL=...?options=-csearch_path%3Dai_engine` все таблицы
+движка создаются в схеме `ai_engine`, существующая `public.agent_runs` (имитация Backend 2) не затронута,
+запуск агента записывается в `ai_engine.agent_runs`.
+
+```
+Linux (локально, Python 3.13):                      169 passed, 3 skipped (Windows-only)
+Windows (GitHub Actions, Python 3.12.10):           171 passed, 1 skipped (Unix-only)
+Linux (GitHub Actions ubuntu-latest, Python 3.12):  успешно
+```
+Прогон: https://github.com/Bigfigboy/marketplace-ai-engine/actions/runs/44835027263
 
 ## HR Assistant: шаблон «Требования вакансии» вместо анализа резюме (итерация 5)
 
