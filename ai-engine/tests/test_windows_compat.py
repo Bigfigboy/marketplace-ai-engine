@@ -91,7 +91,10 @@ def test_small_pdf_and_docx_without_resource_module(simulated_windows):
 def test_worker_survives_missing_resource_module(tmp_path):
     (tmp_path / "sitecustomize.py").write_text(SIMULATE_WINDOWS, encoding="utf-8")
     result = run_worker(small_pdf(), "pdf", env={"PYTHONPATH": f"{APP_ROOT}{os.pathsep}{tmp_path}"})
-    assert result["ok"] is True and result["memory_limit"] == "unavailable"
+    # Unix: the limit is lost but extraction works and the gap is reported. Windows never uses
+    # `resource`: the Job Object limit still applies.
+    expected = "job_object" if sys.platform == "win32" else "unavailable"
+    assert result["ok"] is True and result["memory_limit"] == expected
 
 
 @pytest.mark.parametrize("encoding", ["cp1251", "cp1252", "ascii"])
