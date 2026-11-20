@@ -17,6 +17,7 @@ from __future__ import annotations
 import io
 import json
 import logging
+import os
 import re
 import subprocess
 import sys
@@ -25,7 +26,7 @@ import zipfile
 from dataclasses import dataclass, field
 from pathlib import Path, PurePosixPath
 
-from app.core.errors import FileValidationError
+from app.core.errors import AppError, FileValidationError
 
 ALLOWED_EXTENSIONS = {".pdf": "pdf", ".docx": "docx", ".txt": "txt"}
 
@@ -244,27 +245,74 @@ def _extract_txt(data: bytes) -> ExtractedDocument:
     raise FileValidationError("The text file encoding is not supported (use UTF-8).", code="corrupted_file")
 
 
+def _worker_command(file_format: str, max_pages: int, max_chars: int, memory_mb: int) -> list[str]:
+    return [sys.executable, "-m", "app.services.extract_worker", file_format, str(max_pages), str(max_chars),
+            str(memory_mb)]
+
+
+def _worker_env() -> dict[str, str]:
+    """Environment for the worker that does not depend on the shell, code page or cwd."""
+    env = dict(os.environ)
+    existing = env.get("PYTHONPATH")
+    # The "app" package must be importable even with PYTHONSAFEPATH set or an unusual cwd.
+    env["PYTHONPATH"] = str(_APP_ROOT) + (os.pathsep + existing if existing else "")
+    env["PYTHONIOENCODING"] = "utf-8"
+    env["PYTHONUTF8"] = "1"
+    return env
+
+
+_memory_limit_warned = False
+
+
 def _extract_isolated(file_format: str, data: bytes, *, max_pages: int, max_chars: int,
                       timeout_seconds: float, memory_mb: int) -> ExtractedDocument:
     """Parse PDF/DOCX in a separate, time- and memory-limited process (see extract_worker)."""
-    cmd = [sys.executable, "-m", "app.services.extract_worker", file_format, str(max_pages), str(max_chars),
-           str(memory_mb)]
+    global _memory_limit_warned
+    kwargs: dict = {}
+    if sys.platform == "win32":
+        kwargs["creationflags"] = getattr(subprocess, "CREATE_NO_WINDOW", 0)  # no console window flashes
     try:
-        proc = subprocess.run(cmd, input=data, capture_output=True, timeout=timeout_seconds,  # noqa: S603
-                              cwd=str(_APP_ROOT), check=False)
+        proc = subprocess.run(_worker_command(file_format, max_pages, max_chars, memory_mb),  # noqa: S603
+                              input=data, capture_output=True, timeout=timeout_seconds, cwd=str(_APP_ROOT),
+                              env=_worker_env(), check=False, **kwargs)
     except subprocess.TimeoutExpired:
         logger.warning("extraction_timeout", extra={"format": file_format})
         raise FileValidationError("The document is too complex to process within the time limit.",
                                   code="document_too_complex") from None
+    except OSError as exc:  # interpreter could not be started at all
+        logger.error("extraction_worker_start_failed", extra={"format": file_format, "error_type": type(exc).__name__})
+        raise AppError("Document processing is unavailable on the server.", code="document_processing_failed",
+                       status_code=500) from None
+
     try:
         result = json.loads(proc.stdout.decode("utf-8"))
-    except (UnicodeDecodeError, json.JSONDecodeError):
-        logger.warning("extraction_worker_failed", extra={"format": file_format, "returncode": proc.returncode})
-        raise FileValidationError("The document needs too much memory or cannot be processed.",
-                                  code="document_too_complex") from None
+        if not isinstance(result, dict):
+            raise ValueError("unexpected worker output")
+    except (UnicodeDecodeError, ValueError):
+        stderr = proc.stderr.decode("utf-8", errors="replace")
+        # Only the exception type/last line is logged (never document text).
+        last_line = (stderr.strip().splitlines() or [""])[-1][:200]
+        killed = proc.returncode < 0 or "MemoryError" in stderr
+        logger.warning("extraction_worker_failed", extra={"format": file_format, "returncode": proc.returncode,
+                                                          "worker_error": last_line.split(":", 1)[0]})
+        if killed:  # terminated by the memory limit / a signal: the document is the problem
+            raise FileValidationError("The document needs too much memory to process.",
+                                      code="document_too_complex") from None
+        # Otherwise it is a server-side fault, not the user's document: say so honestly.
+        raise AppError("Document processing failed on the server. Please report this to the administrator.",
+                       code="document_processing_failed", status_code=500) from None
+
+    if memory_mb > 0 and result.get("memory_limit") not in ("rlimit", "job_object") and not _memory_limit_warned:
+        _memory_limit_warned = True
+        logger.warning("extraction_memory_limit_unavailable",
+                       extra={"platform": sys.platform, "mode": result.get("memory_limit")})
     if result.get("ok"):
         return ExtractedDocument(text=result["text"], file_format=file_format, page_count=result["page_count"],
                                  warnings=list(result["warnings"]))
+    if result.get("code") == "worker_error":
+        logger.error("extraction_worker_error", extra={"format": file_format, "detail": result.get("message")})
+        raise AppError("Document processing failed on the server. Please report this to the administrator.",
+                       code="document_processing_failed", status_code=500)
     raise FileValidationError(result.get("message") or "The document cannot be read.",
                               code=result.get("code") or "corrupted_file")
 

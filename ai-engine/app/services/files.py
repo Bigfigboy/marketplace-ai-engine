@@ -54,7 +54,9 @@ def _company_dir(settings: Settings, company_id: str) -> Path:
 
 
 def _write_private(path: Path, data: bytes) -> None:
-    fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+    # O_BINARY (Windows only) prevents CRT newline translation that would corrupt stored files.
+    flags = os.O_WRONLY | os.O_CREAT | os.O_TRUNC | getattr(os, "O_BINARY", 0)
+    fd = os.open(path, flags, 0o600)
     with os.fdopen(fd, "wb") as fh:
         fh.write(data)
 

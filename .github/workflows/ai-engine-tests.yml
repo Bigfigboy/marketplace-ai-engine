@@ -1,0 +1,45 @@
+# Runs the AI Engine test suite on Linux and Windows (GitHub-hosted runners).
+# No secrets are used: all LLM calls in tests are simulated, all data is fictional.
+name: ai-engine-tests
+
+on:
+  push:
+    paths:
+      - "ai-engine/**"
+      - ".github/workflows/ai-engine-tests.yml"
+  pull_request:
+    paths:
+      - "ai-engine/**"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ai-engine-tests-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test:
+    name: pytest (${{ matrix.os }}, Python ${{ matrix.python }})
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+        python: ["3.12"]
+    defaults:
+      run:
+        working-directory: ai-engine
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python }}
+          cache: pip
+          cache-dependency-path: ai-engine/requirements.txt
+      - name: Install dependencies
+        run: python -m pip install -r requirements.txt
+      - name: Run tests
+        run: python -m pytest -o addopts="" -p no:cacheprovider -q -rs

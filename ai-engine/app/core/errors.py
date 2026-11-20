@@ -7,12 +7,10 @@ file paths and user input are never echoed back.
 from __future__ import annotations
 
 import logging
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
-from fastapi import FastAPI, Request
-from fastapi.exceptions import RequestValidationError
-from fastapi.responses import JSONResponse
-from starlette.exceptions import HTTPException as StarletteHTTPException
+if TYPE_CHECKING:  # FastAPI is imported lazily: the document worker process uses these
+    from fastapi import FastAPI, Request  # error classes and must start quickly (notably on Windows).
 
 logger = logging.getLogger("app.errors")
 
@@ -92,6 +90,10 @@ def _request_id(request: Request) -> str | None:
 
 
 def install_error_handlers(app: FastAPI) -> None:
+    from fastapi.exceptions import RequestValidationError
+    from fastapi.responses import JSONResponse
+    from starlette.exceptions import HTTPException as StarletteHTTPException
+
     @app.exception_handler(AppError)
     async def _app_error(request: Request, exc: AppError) -> JSONResponse:
         return JSONResponse(

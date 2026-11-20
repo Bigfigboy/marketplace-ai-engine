@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import os
 import stat
+import sys
 from pathlib import Path
 
 from tests.conftest import (
@@ -89,8 +90,11 @@ def test_delete_file_removes_blobs_and_chunks(env):
     company_dir = Path(env.settings.storage_dir) / env.a.company_id
     assert (company_dir / f"{fid}.bin").exists()
     # Stored privately, outside any web-served directory, under a random name.
-    mode = stat.S_IMODE(os.stat(company_dir / f"{fid}.bin").st_mode)
-    assert mode == 0o600
+    if sys.platform != "win32":  # POSIX permissions; on Windows the profile folder ACL applies
+        mode = stat.S_IMODE(os.stat(company_dir / f"{fid}.bin").st_mode)
+        assert mode == 0o600
+    # Stored bytes are identical to the upload (no newline translation on Windows).
+    assert (company_dir / f"{fid}.bin").read_bytes() == KB_COFFEE_RU.encode()
     assert "kb.txt" not in os.listdir(company_dir)
     assert env.client.delete(f"/files/{fid}", headers=env.a.admin).status_code == 204
     assert not (company_dir / f"{fid}.bin").exists() and not (company_dir / f"{fid}.txt").exists()
